@@ -1,0 +1,799 @@
+Install and configure a multi-master Kubernetes cluster with kubeadm on CentOS 7.x 
+###################################################################################
+
+Lab Setup: 
+##########
+
+HostName					IPAddress	RAM		CPU		HDD		OS				Role
+master1.example.com			10.0.2.10	2 GB	2		60 GB 	CentOS 7.X		Master
+master2.example.com			10.0.2.20	2 GB	2		60 GB 	CentOS 7.X		Master
+master3.example.com			10.0.2.21	2 GB	2		60 GB 	CentOS 7.X		Master
+node1.example.com			10.0.2.11	2 GB	2		60 GB	CentOS 7.X		Worker
+node2.example.com			10.0.2.12	2 GB	2		60 GB	CentOS 7.X		Worker
+node3.example.com			10.0.2.13	2 GB	2		60 GB	CentOS 7.X		Router
+node4.example.com			10.0.2.14	2 GB	2		60 GB	CentOS 7.X		Router
+lb.example.com				10.0.2.15	2 GB	2		60 GB	CentOS 7.X		Load Balancer / CA Server 
+
+
+
+Step 1: Do the below tasks to prepare the nodes for Kubernetes Cluster 
+		1.1	Configure IP Address 
+		1.2	Configure Hostname
+		1.4	Stop Firewall 
+		1.7	Update the System 
+		1.8 Reboot the system
+
+
+Step 2: Once you have prepared the nodes by performing the above mentioned task, follow the below instructions: 
+1.	Install Docker Package on all Nodes
+2.	Start and Enable Docker Service on all Nodes except lb 
+
+~]# yum install -y docker
+~]# systemctl start docker && systemctl enable docker 
+~]# systemctl status docker 
+~]# docker version
+
+
+
+Step 3: Configure hosts file to resolve hostnames on all nodes 
+
+~]# vim /etc/hosts 
+
+10.0.2.10       master1.example.com     master1
+10.0.2.20       master2.example.com     master2
+10.0.2.21       master3.example.com     master3
+10.0.2.11       node1.example.com       node1
+10.0.2.12       node2.example.com       node2
+10.0.2.13       node3.example.com       node3
+10.0.2.14       node4.example.com       node4
+10.0.2.15       lb.example.com          lb
+
+:wq (save and exit) 
+
+
+Step 4: Stop and Disable the Swap Partition on all nodes. 
+
+~]# swapoff -a && sed -i 's/.*swap.*/#&/' /etc/fstab
+~]# swapon -s
+~]# cat /etc/fstab | grep -i swap
+
+
+Step 5: Change SELinux Mode to Permissive on all nodes.   
+~]# setenforce 0
+~]# sed -i --follow-symlinks "s/^SELINUX=enforcing/SELINUX=permissive/g" /etc/sysconfig/selinux
+
+
+
+Step 6: configure Network Bridge Setting and Enable Forwarding on all Nodes.
+
+~]# vim  /etc/sysctl.d/k8s.conf
+
+net.bridge.bridge-nf-call-ip6tables = 1
+net.bridge.bridge-nf-call-iptables = 1
+net.ipv4.ip_forward = 1
+vm.swappiness=0
+
+:wq (save and exit) 
+
+~]# sysctl --system
+
+
+
+Step 7: Install and Confifure the HAProxy load balancer on lb Node
+
+[root@lb ~]# yum install haproxy openssl-devel -y
+
+[root@lb ~]# mv /etc/haproxy/haproxy.cfg /etc/haproxy/haproxy.cfg.orig
+
+Configure rsyslog to capture haproxy logs
+
+[root@lb ~]# vim /etc/rsyslog.conf
+
+##Add the below two lines in rules section 
+
+### HAProxy Log
+local2.*        /var/log/haproxy.log
+
+
+:wq (save and exit) 
+
+
+[root@lb ~]# systemctl restart rsyslog
+[root@lb ~]# systemctl status rsyslog
+
+
+
+Configure HAProxy to load balance the traffic between the three Kubernetes master nodes.
+
+[root@lb ~]# mv /etc/haproxy/haproxy.cfg /etc/haproxy/haproxy.cfg.bak
+
+
+Add the below lines into the files 
+
+[root@lb ~]# vim /etc/haproxy/haproxy.cfg
+
+global
+    chroot      /var/lib/haproxy
+    pidfile     /var/run/haproxy.pid
+    maxconn     4000
+    user        haproxy
+    group       haproxy
+    daemon
+    stats socket /var/lib/haproxy/stats
+
+defaults
+    mode http
+    log global
+    option                  redispatch
+    retries                 3
+    timeout http-request    10s
+    timeout queue           1m
+    timeout connect         10s
+    timeout client          1m
+    timeout server          1m
+    timeout http-keep-alive 10s
+    timeout check           10s
+    maxconn                 3000
+
+frontend kubernetes
+    mode tcp
+    bind *:80
+    option tcplog
+    default_backend kubernetes-master-nodes
+
+
+backend kubernetes-master-nodes
+    mode tcp
+    balance roundrobin
+    option tcp-check
+    server master1 10.0.2.10:6443 check fall 3 rise 2
+    server master2 10.0.2.20:6443 check fall 3 rise 2
+    server master3 10.0.2.21:6443 check fall 3 rise 2
+
+
+:wq (save and exit) 
+
+Start and Enable haproxy service 
+
+[root@lb ~]# systemctl start haproxy
+[root@lb ~]# systemctl enable haproxy
+[root@lb ~]# systemctl status haproxy
+
+[root@lb ~]# setenforce 0
+~]# sed -i --follow-symlinks "s/^SELINUX=enforcing/SELINUX=permissive/g" /etc/sysconfig/selinux
+
+[root@lb ~]# netstat -ntlp | grep 6443
+tcp        0      0 0.0.0.0:6443            0.0.0.0:*               LISTEN      3420/haproxy
+
+
+[root@lb ~]# echo "net.ipv4.ip_nonlocal_bind=1" >> /etc/sysctl.conf
+[root@lb ~]# cat /etc/sysctl.conf
+[root@lb ~]# sysctl -p
+
+[root@lb ~]# yum install nmap-ncat-6.40-16.el7.x86_64 -y
+
+[root@lb ~]# nc -zv 10.0.2.15 6443
+
+
+
+Step 8: Install and Configure Cloud Flare Certificate Authority on lb Node 
+
+Download the binaries.
+
+[root@lb ~]# yum install wget -y
+[root@lb ~]# wget https://pkg.cfssl.org/R1.2/cfssl_linux-amd64
+[root@lb ~]# wget https://pkg.cfssl.org/R1.2/cfssljson_linux-amd64
+
+
+Copy these binaries to /usr/local/bin.
+
+[root@lb ~]# cp cfssl_linux-amd64 /usr/local/bin/cfssl
+[root@lb ~]# cp cfssljson_linux-amd64 /usr/local/bin/cfssljson
+
+Add the execution permission to the binaries.
+
+[root@lb ~]# chmod +x /usr/local/bin/cfssl*
+
+[root@lb ~]# ls -l /usr/local/bin/cfssl*
+-rwxr-xr-x. 1 root root 10376657 May 10 09:50 /usr/local/bin/cfssl
+-rwxr-xr-x. 1 root root  2277873 May 10 09:50 /usr/local/bin/cfssljson
+
+
+Verify the installation.
+
+[root@lb ~]# cfssl version
+
+Version: 1.2.0
+Revision: dev
+Runtime: go1.6
+
+
+Create the certificate authority configuration file.
+
+[root@lb ~]# mkdir kube-ca && cd kube-ca
+
+[root@lb kube-ca]# vim ca-config.json
+
+{
+  "signing": {
+    "default": {
+      "expiry": "8760h"
+    },
+    "profiles": {
+      "kubernetes": {
+        "usages": ["signing", "key encipherment", "server auth", "client auth"],
+        "expiry": "8760h"
+      }
+    }
+  }
+}
+
+:wq (save and exit) 
+
+
+Create the certificate authority signing request configuration file.
+
+[root@lb kube-ca]# vim ca-csr.json
+
+{
+  "CN": "Kubernetes",
+  "key": {
+    "algo": "rsa",
+    "size": 2048
+  },
+  "names": [
+  {
+    "C": "IN",
+    "L": "Delhi",
+    "O": "k8s",
+    "OU": "DevOps",
+    "ST": "New Delhi"
+  }
+ ]
+}
+
+:wq (save and exit) 
+
+
+Generate the certificate authority certificate and private key.
+
+[root@lb kube-ca]# cfssl gencert -initca ca-csr.json | cfssljson -bare ca
+
+
+Verify that the ca-key.pem and the ca.pem were generated.
+
+[root@lb kube-ca]# ls -l
+total 20
+-rw-r--r--. 1 root root  232 May 10 09:55 ca-config.json
+-rw-r--r--. 1 root root 1001 May 10 09:57 ca.csr
+-rw-r--r--. 1 root root  193 May 10 09:56 ca-csr.json
+-rw-------. 1 root root 1679 May 10 09:57 ca-key.pem
+-rw-r--r--. 1 root root 1359 May 10 09:57 ca.pem
+
+
+Creating the certificate for the Etcd cluster
+
+Create the certificate signing request configuration file.
+
+[root@lb kube-ca]# vim kubernetes-csr.json
+
+{
+  "CN": "kubernetes",
+  "key": {
+    "algo": "rsa",
+    "size": 2048
+  },
+  "names": [
+  {
+    "C": "IN",
+    "L": "Delhi",
+    "O": "k8s",
+    "OU": "DevOps",
+    "ST": "New Delhi"
+  }
+ ]
+}
+
+:wq (save and exit) 
+
+Generate the certificate and private key for etcd. 
+
+[root@lb kube-ca]# cfssl gencert -ca=ca.pem -ca-key=ca-key.pem -config=ca-config.json \
+-hostname=10.0.2.10,master1.example.com,10.0.2.20,master2.example.com,10.0.2.21,master3.example.com,10.0.2.15,lb.example.com,127.0.0.1,kubernetes.default \
+-profile=kubernetes kubernetes-csr.json | cfssljson -bare kubernetes
+
+
+Verify that the kubernetes-key.pem and the kubernetes.pem file were generated.
+
+[root@lb kube-ca]# ls -l
+total 36
+-rw-r--r--. 1 root root  232 May 10 09:55 ca-config.json
+-rw-r--r--. 1 root root 1001 May 10 09:57 ca.csr
+-rw-r--r--. 1 root root  193 May 10 09:56 ca-csr.json
+-rw-------. 1 root root 1679 May 10 09:57 ca-key.pem
+-rw-r--r--. 1 root root 1359 May 10 09:57 ca.pem
+-rw-r--r--. 1 root root 1001 May 10 10:02 kubernetes.csr
+-rw-r--r--. 1 root root  193 May 10 09:59 kubernetes-csr.json
+-rw-------. 1 root root 1679 May 10 10:02 kubernetes-key.pem
+-rw-r--r--. 1 root root 1590 May 10 10:02 kubernetes.pem
+
+
+Copy "ca.pem" "kubernetes.pem" "kubernetes-key.pem" certificate to each nodes.
+
+[root@lb kube-ca]# scp ca.pem kubernetes.pem kubernetes-key.pem root@master1.example.com:~/
+[root@lb kube-ca]# scp ca.pem kubernetes.pem kubernetes-key.pem root@master2.example.com:~/
+[root@lb kube-ca]# scp ca.pem kubernetes.pem kubernetes-key.pem root@master3.example.com:~/
+[root@lb kube-ca]# scp ca.pem kubernetes.pem kubernetes-key.pem root@node1.example.com:~/
+[root@lb kube-ca]# scp ca.pem kubernetes.pem kubernetes-key.pem root@node2.example.com:~/
+[root@lb kube-ca]# scp ca.pem kubernetes.pem kubernetes-key.pem root@node3.example.com:~/
+[root@lb kube-ca]# scp ca.pem kubernetes.pem kubernetes-key.pem root@node4.example.com:~/
+
+
+
+Step 9: Configure YUM Package Repository to Install Kubernetes 1.14 Cluster Packages on all Nodes except lb 
+
+~]# vim /etc/yum.repos.d/kubernetes.repo
+[kubernetes]
+name=Kubernetes
+baseurl=https://packages.cloud.google.com/yum/repos/kubernetes-el7-x86_64
+enabled=1
+gpgcheck=1
+repo_gpgcheck=1
+gpgkey=https://packages.cloud.google.com/yum/doc/yum-key.gpg 
+	https://packages.cloud.google.com/yum/doc/rpm-package-key.gpg
+	
+	
+:wq (save and exit)
+
+
+Step 10: Install Kubernetes Packages and Start & Enable kubelet service on all Nodes. 
+
+~]# yum install -y kubelet kubeadm kubectl wget 
+~]# systemctl enable kubelet && systemctl start kubelet
+
+
+
+Step 11: Install and configure Etcd on master1 
+
+Create a configuration directory for Etcd.
+
+[root@master1 ~]# mkdir /etc/etcd /var/lib/etcd
+
+Move the certificates to the configuration /etc/etcd/ directory.
+
+[root@master1 ~]# mv ~/ca.pem ~/kubernetes.pem ~/kubernetes-key.pem /etc/etcd/
+[root@master1 ~]# ls -l /etc/etcd/
+total 12
+-rw-r--r--. 1 root root 1359 May 10 10:06 ca.pem
+-rw-------. 1 root root 1679 May 10 10:06 kubernetes-key.pem
+-rw-r--r--. 1 root root 1590 May 10 10:06 kubernetes.pem
+
+[root@master1 ~]# chmod -R a+r /etc/etcd/
+
+Download the etcd binaries.
+
+[root@master1 ~]# wget https://github.com/coreos/etcd/releases/download/v3.3.9/etcd-v3.3.9-linux-amd64.tar.gz
+
+Extract the etcd archive.
+
+[root@master1 ~]# tar xvzf etcd-v3.3.9-linux-amd64.tar.gz
+
+Move the etcd binaries to /usr/local/bin.
+
+[root@master1 ~]# mv etcd-v3.3.9-linux-amd64/etcd* /usr/local/bin/
+
+[root@master1 ~]# ls -l /usr/local/bin/
+total 33932
+-rwxr-xr-x. 1 student student 18934016 Jul 24  2018 etcd
+-rwxr-xr-x. 1 student student 15809280 Jul 24  2018 etcdctl
+
+
+Create an etcd systemd unit file.
+
+[root@master1 ~]# vim /etc/systemd/system/etcd.service
+
+[Unit]
+Description=etcd
+Documentation=https://github.com/coreos
+
+
+[Service]
+ExecStart=/usr/local/bin/etcd \
+  --name 10.0.2.10 \
+  --cert-file=/etc/etcd/kubernetes.pem \
+  --key-file=/etc/etcd/kubernetes-key.pem \
+  --peer-cert-file=/etc/etcd/kubernetes.pem \
+  --peer-key-file=/etc/etcd/kubernetes-key.pem \
+  --trusted-ca-file=/etc/etcd/ca.pem \
+  --peer-trusted-ca-file=/etc/etcd/ca.pem \
+  --peer-client-cert-auth \
+  --client-cert-auth \
+  --initial-advertise-peer-urls https://10.0.2.10:2380 \
+  --listen-peer-urls https://10.0.2.10:2380 \
+  --listen-client-urls https://10.0.2.10:2379,https://127.0.0.1:2379 \
+  --advertise-client-urls https://10.0.2.10:2379 \
+  --initial-cluster-token etcd-cluster-0 \
+  --initial-cluster 10.0.2.10=https://10.0.2.10:2380,10.0.2.20=https://10.0.2.20:2380,10.0.2.21=https://10.0.2.21:2380 \
+  --initial-cluster-state new \
+  --data-dir=/var/lib/etcd
+Restart=on-failure
+RestartSec=5
+
+
+
+[Install]
+WantedBy=multi-user.target
+
+:wq (save and exit) 
+
+
+Reload the daemon configuration.
+
+[root@master1 ~]# systemctl daemon-reload
+
+Start and Enable etcd to start at boot time.
+
+[root@master1 ~]# systemctl enable etcd
+[root@master1 ~]# systemctl start etcd
+[root@master1 ~]# systemctl status etcd
+
+
+
+Step 12: Installing and configuring Etcd on master2 Node
+
+Create a configuration directory for Etcd.
+
+[root@master2 ~]# mkdir /etc/etcd /var/lib/etcd
+
+Move the certificates to the configuration /etc/etcd/ directory.
+
+[root@master2 ~]# mv ~/ca.pem ~/kubernetes.pem ~/kubernetes-key.pem /etc/etcd/
+[root@master2 ~]# ls -l /etc/etcd/
+total 12
+-rw-r--r--. 1 root root 1359 May 10 10:06 ca.pem
+-rw-------. 1 root root 1679 May 10 10:06 kubernetes-key.pem
+-rw-r--r--. 1 root root 1590 May 10 10:06 kubernetes.pem
+
+[root@master2 ~]# chmod -R a+r /etc/etcd/
+
+Download the etcd binaries.
+
+[root@master2 ~]# wget https://github.com/coreos/etcd/releases/download/v3.3.9/etcd-v3.3.9-linux-amd64.tar.gz
+
+Extract the etcd archive.
+
+[root@master2 ~]# tar xvzf etcd-v3.3.9-linux-amd64.tar.gz
+
+Move the etcd binaries to /usr/local/bin.
+
+[root@master2 ~]# mv etcd-v3.3.9-linux-amd64/etcd* /usr/local/bin/
+
+[root@master2 ~]# ls -l /usr/local/bin/
+total 33932
+-rwxr-xr-x. 1 student student 18934016 Jul 24  2018 etcd
+-rwxr-xr-x. 1 student student 15809280 Jul 24  2018 etcdctl
+
+
+Create an etcd systemd unit file.
+
+[root@master2 ~]# vim /etc/systemd/system/etcd.service
+
+[Unit]
+Description=etcd
+Documentation=https://github.com/coreos
+
+
+[Service]
+ExecStart=/usr/local/bin/etcd \
+  --name 10.0.2.20 \
+  --cert-file=/etc/etcd/kubernetes.pem \
+  --key-file=/etc/etcd/kubernetes-key.pem \
+  --peer-cert-file=/etc/etcd/kubernetes.pem \
+  --peer-key-file=/etc/etcd/kubernetes-key.pem \
+  --trusted-ca-file=/etc/etcd/ca.pem \
+  --peer-trusted-ca-file=/etc/etcd/ca.pem \
+  --peer-client-cert-auth \
+  --client-cert-auth \
+  --initial-advertise-peer-urls https://10.0.2.20:2380 \
+  --listen-peer-urls https://10.0.2.20:2380 \
+  --listen-client-urls https://10.0.2.20:2379,https://127.0.0.1:2379 \
+  --advertise-client-urls https://10.0.2.20:2379 \
+  --initial-cluster-token etcd-cluster-0 \
+  --initial-cluster 10.0.2.10=https://10.0.2.10:2380,10.0.2.20=https://10.0.2.20:2380,10.0.2.21=https://10.0.2.21:2380 \
+  --initial-cluster-state new \
+  --data-dir=/var/lib/etcd
+Restart=on-failure
+RestartSec=5
+
+
+[Install]
+WantedBy=multi-user.target
+
+
+:wq (save and exit) 
+
+
+Reload the daemon configuration.
+
+[root@master2 ~]# systemctl daemon-reload
+
+Start and Enable etcd to start at boot time.
+
+[root@master2 ~]# systemctl enable etcd
+[root@master2 ~]# systemctl start etcd
+[root@master2 ~]# systemctl status etcd
+
+
+
+Step 12: Installing and configuring Etcd on master2 Node
+
+Create a configuration directory for Etcd.
+
+[root@master3 ~]# mkdir /etc/etcd /var/lib/etcd
+
+Move the certificates to the configuration /etc/etcd/ directory.
+
+[root@master3 ~]# mv ~/ca.pem ~/kubernetes.pem ~/kubernetes-key.pem /etc/etcd/
+[root@master3 ~]# ls -l /etc/etcd/
+total 12
+-rw-r--r--. 1 root root 1359 May 10 10:06 ca.pem
+-rw-------. 1 root root 1679 May 10 10:06 kubernetes-key.pem
+-rw-r--r--. 1 root root 1590 May 10 10:06 kubernetes.pem
+
+[root@master3 ~]# chmod -R a+r /etc/etcd/
+
+Download the etcd binaries.
+
+[root@master3 ~]# wget https://github.com/coreos/etcd/releases/download/v3.3.9/etcd-v3.3.9-linux-amd64.tar.gz
+
+Extract the etcd archive.
+
+[root@master3 ~]# tar xvzf etcd-v3.3.9-linux-amd64.tar.gz
+
+Move the etcd binaries to /usr/local/bin.
+
+[root@master3 ~]# mv etcd-v3.3.9-linux-amd64/etcd* /usr/local/bin/
+
+[root@master3 ~]# ls -l /usr/local/bin/
+total 33932
+-rwxr-xr-x. 1 student student 18934016 Jul 24  2018 etcd
+-rwxr-xr-x. 1 student student 15809280 Jul 24  2018 etcdctl
+
+
+Create an etcd systemd unit file.
+
+[root@master3 ~]# vim /etc/systemd/system/etcd.service
+
+[Unit]
+Description=etcd
+Documentation=https://github.com/coreos
+
+
+[Service]
+ExecStart=/usr/local/bin/etcd \
+  --name 10.0.2.21 \
+  --cert-file=/etc/etcd/kubernetes.pem \
+  --key-file=/etc/etcd/kubernetes-key.pem \
+  --peer-cert-file=/etc/etcd/kubernetes.pem \
+  --peer-key-file=/etc/etcd/kubernetes-key.pem \
+  --trusted-ca-file=/etc/etcd/ca.pem \
+  --peer-trusted-ca-file=/etc/etcd/ca.pem \
+  --peer-client-cert-auth \
+  --client-cert-auth \
+  --initial-advertise-peer-urls https://10.0.2.21:2380 \
+  --listen-peer-urls https://10.0.2.21:2380 \
+  --listen-client-urls https://10.0.2.21:2379,https://127.0.0.1:2379 \
+  --advertise-client-urls https://10.0.2.21:2379 \
+  --initial-cluster-token etcd-cluster-0 \
+  --initial-cluster 10.0.2.10=https://10.0.2.10:2380,10.0.2.20=https://10.0.2.20:2380,10.0.2.21=https://10.0.2.21:2380 \
+  --initial-cluster-state new \
+  --data-dir=/var/lib/etcd
+Restart=on-failure
+RestartSec=5
+
+
+
+[Install]
+WantedBy=multi-user.target
+
+
+
+:wq (save and exit) 
+
+
+Reload the daemon configuration.
+
+[root@master3 ~]# systemctl daemon-reload
+
+Start and Enable etcd to start at boot time.
+
+[root@master3 ~]# systemctl enable etcd
+[root@master3 ~]# systemctl start etcd
+[root@master3 ~]# systemctl status etcd
+
+
+Step 13: Verify that the etcd cluster is up and running.
+
+[root@master1 ~]# etcdctl -C https://10.0.2.10:2379 --ca-file=/etc/etcd/ca.pem --cert-file=/etc/etcd/kubernetes.pem --key-file=/etc/etcd/kubernetes-key.pem cluster-health
+
+member 36a8880a9ae64822 is healthy: got healthy result from https://10.0.2.21:2379
+member 609e71e70eda4567 is healthy: got healthy result from https://10.0.2.20:2379
+member 8ec27d324d7508b8 is healthy: got healthy result from https://10.0.2.10:2379
+
+[root@master1 ~]# etcdctl -C https://10.0.2.10:2379 --ca-file=/etc/etcd/ca.pem --cert-file=/etc/etcd/kubernetes.pem --key-file=/etc/etcd/kubernetes-key.pem member list
+
+36a8880a9ae64822: name=10.0.2.21 peerURLs=https://10.0.2.21:2380 clientURLs=https://10.0.2.21:2379 isLeader=false
+609e71e70eda4567: name=10.0.2.20 peerURLs=https://10.0.2.20:2380 clientURLs=https://10.0.2.20:2379 isLeader=false
+8ec27d324d7508b8: name=10.0.2.10 peerURLs=https://10.0.2.10:2380 clientURLs=https://10.0.2.10:2379 isLeader=true
+
+
+
+Before Initialize Kubernetes Cluster, you can pull the docker images on master and worker node to make the process faster: 
+
+
+On master Nodes: 
+
+REPOSITORY                           TAG                 IMAGE ID            CREATED             SIZE
+k8s.gcr.io/kube-proxy                v1.14.1             20a2d7035165        4 weeks ago         82.1 MB
+k8s.gcr.io/kube-apiserver            v1.14.1             cfaa4ad74c37        4 weeks ago         210 MB
+k8s.gcr.io/kube-scheduler            v1.14.1             8931473d5bdb        4 weeks ago         81.6 MB
+k8s.gcr.io/kube-controller-manager   v1.14.1             efb3887b411d        4 weeks ago         158 MB
+docker.io/weaveworks/weave-npc       2.5.1               789b7f496034        3 months ago        49.6 MB
+docker.io/weaveworks/weave-kube      2.5.1               1f394ae9e226        3 months ago        148 MB
+k8s.gcr.io/coredns                   1.3.1               eb516548c180        3 months ago        40.3 MB
+k8s.gcr.io/etcd                      3.3.10              2c4adeb21b4f        5 months ago        258 MB
+k8s.gcr.io/pause                     3.1                 da86e6ba6ca1        16 months ago       742 kB
+
+
+On worker Nodes: 
+
+REPOSITORY                           TAG                 IMAGE ID            CREATED             SIZE
+docker.io/weaveworks/weave-npc       2.5.1               789b7f496034        3 months ago        49.6 MB
+docker.io/weaveworks/weave-kube      2.5.1               1f394ae9e226        3 months ago        148 MB
+
+
+
+Step 14: Initialize Kubernetes Master Nodes 
+
+Do the following on master1 Node: 
+##################################
+
+Create the configuration file for kubeadm.
+
+[root@master1 ~]# vim kubeadm-config.yaml
+
+apiVersion: kubeadm.k8s.io/v1beta1
+kind: ClusterConfiguration
+kubernetesVersion: stable
+controlPlaneEndpoint: "lb.example.com:6443"
+etcd:
+    external:
+        endpoints:
+        - https://10.0.2.10:2379
+        - https://10.0.2.20:2379
+        - https://10.0.2.21:2379
+        caFile: /etc/etcd/ca.pem
+        certFile: /etc/etcd/kubernetes.pem
+        keyFile: /etc/etcd/kubernetes-key.pem
+
+
+:wq (save and exit) 
+
+
+Initialize the machine as a master node.
+
+
+[root@master1 ~]# kubeadm config images pull
+[root@master1 ~]# kubeadm init --config kubeadm-config.yaml --experimental-upload-certs | tee kube-cluster-init.txt
+
+
+[root@master1 ~]# mkdir -p $HOME/.kube
+[root@master1 ~]# sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
+[root@master1 ~]# sudo chown $(id -u):$(id -g) $HOME/.kube/config
+
+[root@master1 ~]# kubectl apply -f "https://cloud.weave.works/k8s/net?k8s-version=$(kubectl version | base64 | tr -d '\n')"
+
+[root@master1 ~]# kubectl get pod -n kube-system
+NAME                                          READY   STATUS    RESTARTS   AGE
+coredns-fb8b8dccf-dsc56                       1/1     Running   0          2m47s
+coredns-fb8b8dccf-x4p5r                       1/1     Running   0          2m47s
+kube-apiserver-master1.example.com            1/1     Running   0          2m1s
+kube-controller-manager-master1.example.com   1/1     Running   0          118s
+kube-proxy-dzqq7                              1/1     Running   0          2m46s
+kube-scheduler-master1.example.com            1/1     Running   0          2m22s
+weave-net-2j2cd                               2/2     Running   0          63s
+
+
+[root@master1 ~]# kubectl get node
+NAME                  STATUS   ROLES    AGE     VERSION
+master1.example.com   Ready    master   3m21s   v1.14.1
+
+
+Run the below command on master2 
+
+[root@master2 ~]# kubeadm config images pull
+
+[root@master2 ~]# kubeadm join lb.example.com:6443 --token 2wzz0j.b7m0e8j2ilnl3qyw \
+    --discovery-token-ca-cert-hash sha256:7f31cec1b72d318c73897b5d98d40737c87b0e109438ee73c482a313bf8ba68c \
+    --experimental-control-plane --certificate-key 29773ad6c3847e7a66c400bb02ed20a3102d9af9143e8cc6fd303dd2812082c0
+
+
+To start using your cluster, you need to run the following: 
+
+[root@master2 ~]# mkdir -p $HOME/.kube
+[root@master2 ~]# sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
+[root@master2 ~]# sudo chown $(id -u):$(id -g) $HOME/.kube/config
+
+
+Run the below command on master3
+
+[root@master3 ~]# kubeadm config images pull
+
+[root@master3 ~]# kubeadm join lb.example.com:6443 --token 2wzz0j.b7m0e8j2ilnl3qyw \
+    --discovery-token-ca-cert-hash sha256:7f31cec1b72d318c73897b5d98d40737c87b0e109438ee73c482a313bf8ba68c \
+    --experimental-control-plane --certificate-key 29773ad6c3847e7a66c400bb02ed20a3102d9af9143e8cc6fd303dd2812082c0
+
+
+
+To start using your cluster, you need to run the following: 
+
+[root@master3 ~]# mkdir -p $HOME/.kube
+[root@master3 ~]# sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
+[root@master3 ~]# sudo chown $(id -u):$(id -g) $HOME/.kube/config
+
+
+
+[root@master1 ~]# kubectl get node
+
+NAME                  STATUS   ROLES    AGE   VERSION
+master1.example.com   Ready    master   86m   v1.14.1
+master2.example.com   Ready    master   12m   v1.14.1
+master3.example.com   Ready    master   11m   v1.14.1
+
+
+[root@master1 ~]# kubectl get pod -n kube-system
+NAME                                          READY   STATUS    RESTARTS   AGE
+coredns-fb8b8dccf-dsc56                       1/1     Running   6          87m
+coredns-fb8b8dccf-x4p5r                       1/1     Running   6          87m
+kube-apiserver-master1.example.com            1/1     Running   4          86m
+kube-apiserver-master2.example.com            1/1     Running   4          12m
+kube-apiserver-master3.example.com            1/1     Running   5          11m
+kube-controller-manager-master1.example.com   1/1     Running   4          86m
+kube-controller-manager-master2.example.com   1/1     Running   0          11m
+kube-controller-manager-master3.example.com   1/1     Running   0          11m
+kube-proxy-dzqq7                              1/1     Running   0          87m
+kube-proxy-qbvhg                              1/1     Running   0          12m
+kube-proxy-xhjc2                              1/1     Running   0          13m
+kube-scheduler-master1.example.com            1/1     Running   4          87m
+kube-scheduler-master2.example.com            1/1     Running   0          12m
+kube-scheduler-master3.example.com            1/1     Running   0          11m
+weave-net-2j2cd                               2/2     Running   0          85m
+weave-net-b87fs                               2/2     Running   4          12m
+weave-net-phpzt                               2/2     Running   4          13m
+
+
+
+Step 15: Initialize the worker nodes, Run the below command: 
+
+[root@node1 ~]# kubeadm join lb.example.com:6443 --token 2wzz0j.b7m0e8j2ilnl3qyw \
+     --discovery-token-ca-cert-hash sha256:7f31cec1b72d318c73897b5d98d40737c87b0e109438ee73c482a313bf8ba68c
+
+[root@node2 ~]# kubeadm join lb.example.com:6443 --token 2wzz0j.b7m0e8j2ilnl3qyw \
+     --discovery-token-ca-cert-hash sha256:7f31cec1b72d318c73897b5d98d40737c87b0e109438ee73c482a313bf8ba68c
+
+
+
+Step 16: Get the list of nodes, Run the below command from any of the master server: 
+
+[root@master1 ~]# kubectl get node
+NAME                  STATUS   ROLES    AGE     VERSION
+master1.example.com   Ready    master   101m    v1.14.1
+master2.example.com   Ready    master   26m     v1.14.1
+master3.example.com   Ready    master   26m     v1.14.1
+node1.example.com     Ready    <none>   10m     v1.14.1
+node2.example.com     Ready    <none>   9m11s   v1.14.1
+node3.example.com     Ready    <none>   10m     v1.14.1
+node4.example.com     Ready    <none>   9m11s   v1.14.1
+
+
+Congratulations, You have successfully configured HA Kubernetes Cluster. 
