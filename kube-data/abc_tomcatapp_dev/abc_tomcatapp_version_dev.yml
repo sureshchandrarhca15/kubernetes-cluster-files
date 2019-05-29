@@ -1,0 +1,45 @@
+---
+
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  labels:
+    k8s-app: abc-tomcatapp-version-dev
+  name: abc-tomcatapp-version-dev
+  namespace: abc-tomcatapp-dev
+spec:
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        k8s-app: abc-tomcatapp-version-dev
+      name: abc-tomcatapp-version-dev
+    spec:
+      containers:      
+        -
+          image: "lb.example.com:5000/version:v2"
+          name: abc-tomcatapp-version-dev
+          ports:
+            -
+              containerPort: 8080
+              protocol: TCP
+                          
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: abc-tomcatapp-version-dev
+  namespace: abc-tomcatapp-dev
+  labels:
+    k8s-app: abc-tomcatapp-version-dev
+spec:
+  ports:
+  - port: 80
+    targetPort: 8080
+    protocol: TCP
+  selector:
+    k8s-app: abc-tomcatapp-version-dev
+  type: ClusterIP
+  

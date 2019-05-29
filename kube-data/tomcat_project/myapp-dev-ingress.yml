@@ -1,0 +1,20 @@
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  name: myapp-dev
+  namespace: myapp-dev
+  annotations:
+    kubernetes.io/ingress.class: "nginx"
+spec:
+  rules:
+  - host: myapp-dev.example.com
+    http:
+      paths:
+      - path: /*
+        backend:
+          serviceName: myapp-svc-dev
+          servicePort: 80
+      - path: /student
+        backend:
+          serviceName: myapp-svc-dev
+          servicePort: 80

@@ -1,0 +1,31 @@
+---
+
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  namespace: abc-tomcatapp-dev
+  name: abc-tomcatapp-dev
+  annotations:
+    kubernetes.io/ingress.class: "nginx"
+spec:
+  rules:
+  - host: abc-tomcatapp-dev.example.com
+    http:
+      paths:
+      - path: /clusterjsp
+        backend:
+          serviceName: abc-tomcatapp-clusterjsp-dev
+          servicePort: 80
+      - path: /example
+        backend:
+          serviceName: abc-tomcatapp-example-dev
+          servicePort: 80
+      - path: /student
+        backend:
+          serviceName: abc-tomcatapp-student-dev
+          servicePort: 80
+      - path: /version
+        backend:
+          serviceName: abc-tomcatapp-version-dev
+          servicePort: 80
+

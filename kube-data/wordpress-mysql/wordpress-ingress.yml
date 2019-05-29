@@ -1,0 +1,20 @@
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  name: wordpress
+  namespace: wordpress
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+spec:
+  tls:
+  - secretName: welcome-wordpress-com-tls
+    hosts: 
+    - welcome.wordpress.com
+  rules:
+  - host: welcome.wordpress.com 
+    http: 
+      paths:
+      - path: /
+        backend:
+          serviceName: wordpress
+          servicePort: 80

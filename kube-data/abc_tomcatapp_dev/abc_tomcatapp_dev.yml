@@ -1,0 +1,69 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: abc-tomcatapp-dev
+
+
+---
+
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  labels:
+    k8s-app: abc-tomcatapp-dev
+  name: abc-tomcatapp-dev
+  namespace: abc-tomcatapp-dev
+spec:
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        k8s-app: abc-tomcatapp-dev
+      name: abc-tomcatapp-dev
+    spec:
+      containers:      
+        -
+          image: "lb.example.com:5000/abc_tomcatapp:v2"
+          name: abc-tomcatapp-dev
+          ports:
+            -
+              containerPort: 8080
+              protocol: TCP
+                          
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: abc-tomcatapp-dev
+  namespace: abc-tomcatapp-dev
+  labels:
+    k8s-app: abc-tomcatapp-dev
+spec:
+  ports:
+  - port: 80
+    targetPort: 8080
+    protocol: TCP
+  selector:
+    k8s-app: abc-tomcatapp-dev
+  type: ClusterIP
+  
+---
+
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  namespace: abc-tomcatapp-dev
+  name: abc-tomcatapp-dev
+  annotations:
+    kubernetes.io/ingress.class: "nginx"
+spec:
+  rules:  
+  - host: abc-tomcatapp-dev.example.com
+    http:
+      paths:
+      - path: /
+        backend:
+          serviceName: abc-tomcatapp-dev
+          servicePort: 80

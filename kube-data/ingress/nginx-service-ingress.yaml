@@ -1,0 +1,19 @@
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  name: nginx
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+spec:
+  tls: 
+  - secretName: welcome-mynginx-svc-com-tls 
+    hosts: 
+    - welcome.mynginx-svc.com
+  rules:
+  - host: welcome.mynginx-svc.com 
+    http: 
+      paths:
+      - path: /
+        backend:
+          serviceName: nginx-service
+          servicePort: 80

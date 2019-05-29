@@ -1,0 +1,17 @@
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  name: http-svc
+  namespace: test
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+spec:
+  rules:
+  - host: welcome.app2-example.com 
+    http:
+      paths:
+      - path: /http-svc
+        backend:
+          serviceName: http-svc
+          servicePort: 80
+

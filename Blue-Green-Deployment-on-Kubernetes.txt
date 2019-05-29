@@ -1,0 +1,234 @@
+													Blue/Green Deployments on Kubernetes
+													####################################
+
+													
+Step 1: Create our "blue" deployment by saving the following yaml to a file blue.yaml.
+
+[root@master ~]# mkdir blue-green-deployment
+[root@master ~]# cd blue-green-deployment
+
+[root@master blue-green-deployment]# vim blue.yaml
+
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  name: nginx-1.10
+spec:
+  replicas: 3
+  template:
+    metadata:
+      labels:
+        name: nginx
+        version: "1.10"
+    spec:
+      containers: 
+        - name: nginx
+          image: nginx:1.10
+          ports:
+            - name: http
+              containerPort: 80
+			  
+:wq (save and exit) 
+
+Step 2:  Create the blue deployment using the kubectl command:
+
+[root@master blue-green-deployment]# kubectl apply -f blue.yaml
+
+[root@master blue-green-deployment]# kubectl get pods
+
+Step 3: Now create a service for blue app deployment
+
+[root@master blue-green-deployment]# vim service.yaml
+
+apiVersion: v1
+kind: Service
+metadata: 
+  name: nginx
+  labels: 
+    name: nginx
+spec:
+  ports:
+    - name: http
+      port: 80
+      targetPort: 80
+  selector: 
+    name: nginx
+    version: "1.10"
+  type: NodePort
+  
+:wq (save and exit) 
+
+[root@master blue-green-deployment]# kubectl apply -f service.yaml
+
+[root@master blue-green-deployment]# kubectl get svc
+
+[root@master blue-green-deployment]# kubectl describe svc nginx
+
+Step 4: As we have created our service using NodePort, it will be accessible using node1 and node2 as following: 
+
+[root@master blue-green-deployment]# curl -s http://node1.example.com:32422/version | grep nginx
+
+<hr><center>nginx/1.10.3</center>
+
+
+[root@master blue-green-deployment]# curl -s http://node2.example.com:32422/version | grep nginx
+
+<hr><center>nginx/1.10.3</center>
+
+NOTE: Please use the below command to check the NodePort for this service:
+
+[root@master blue-green-deployment]# kubectl describe svc nginx | grep NodePort
+
+
+Step 5: Now Let's Creating Green Deployment
+
+[root@master blue-green-deployment]# vim green.yaml
+
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  name: nginx-1.11
+spec:
+  replicas: 2
+  template:
+    metadata:
+      labels:
+        name: nginx
+        version: "1.11"
+    spec:
+      containers: 
+        - name: nginx
+          image: nginx:1.11
+          ports:
+            - name: http
+              containerPort: 80
+
+:wq (save and exit)
+
+NOTE: in blue deployment, I have used docker image "nginx:1.10" and in green deployment I have used docker image "nginx:1.11". 
+
+Step 6: Create the green deployment using the kubectl command:
+
+[root@master blue-green-deployment]# kubectl apply -f green.yaml
+
+[root@master blue-green-deployment]# kubectl get pods -o wide
+
+
+Step 7: Now switch service from blue deployment to green deployment. 
+
+To cut over to the "green" deployment we will update the selector for the service. Edit the service.yaml and change the selector version to "1.11". 
+That will make it so that it matches the pods on the "green" deployment.
+
+[root@master blue-green-deployment]# vim service.yaml
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx
+  labels:
+    name: nginx
+spec:
+  ports:
+    - name: http
+      port: 80
+      targetPort: 80
+  selector:
+    name: nginx
+    version: "1.11"
+  type: NodePort
+
+:wq (save and exit) 
+
+NOTE: you only eedit to change version: "1.10" to version: "1.11". 
+
+
+Step 8: Now Apply the service changes.
+
+[root@master blue-green-deployment]# kubectl apply -f service.yaml
+
+
+Step 9: Now use the same URL which you were using for blue deployment. 
+
+[root@master blue-green-deployment]# curl -s http://node1.example.com:32422/version | grep nginx
+
+<hr><center>nginx/1.11.13</center>
+
+
+[root@master blue-green-deployment]# curl -s http://node1.example.com:32422/version | grep nginx
+
+<hr><center>nginx/1.11.13</center>
+
+
+Step 9: if Green Deployment App is working as expected, then you can scal down your Blue Deploy or detele the blue deployment. 
+
+to scale down blue deployment: 
+
+[root@master blue-green-deployment]# kubectl scale --replicas=0 deployment nginx-1.10
+
+To Delete blue deployment: 
+
+[root@master blue-green-deployment]# kubectl delete deployment nginx-1.10
+
+
+You have sucessfully done Blue-Green Deployment. Enjoy your Day..:)
+
+###########################################################################
+
+
+																Steps to Install Kubernetes Dashboard
+																######################################
+Step 1: Download the YAML file for Kubernetes Dashboard. 
+
+[root@master ~]# mkdir kube-dashboard
+[root@master ~]# cd kube-dashboard
+
+[root@master kube-dashboard]# wget https://raw.githubusercontent.com/kubernetes/dashboard/master/src/deploy/recommended/kubernetes-dashboard.yaml
+
+Step 2: Run the below command to Install Dashboard 
+
+[root@master kube-dashboard]# kubectl apply -f kubernetes-dashboard.yaml
+[root@master kube-dashboard]# kubectl get pods -n kube-system
+
+Step 3: By default, the dashboard will install with minimum user role privileges. To access the dashboard with full administrative permission, create a YAML file named dashboard-admin.yaml.
+
+[root@master kube-dashboard]# vim dashboard-admin.yaml
+
+apiVersion: rbac.authorization.k8s.io/v1beta1
+kind: ClusterRoleBinding
+metadata:
+  name: kubernetes-dashboard
+  labels:
+    k8s-app: kubernetes-dashboard
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+- kind: ServiceAccount
+  name: kubernetes-dashboard
+  namespace: kube-system
+
+
+:wq (save and exit) 
+  
+Step 4: Apply the full admin privileges to dashboard service account using the dashboard-admin YAML file.
+
+[root@master kube-dashboard]# kubectl create -f dashboard-admin.yaml
+
+Step 5: From the master server, execute the below command to run the kubernetes proxy command in the background.
+
+[root@master kube-dashboard]# nohup kubectl proxy --address="10.0.2.10" -p 443 --accept-hosts='^*$' &
+
+
+
+
+
+
+
+
+
+
+[root@master ~]# kubectl label node  node2 node-role.kubernetes.io/worker=worker
+
+
+

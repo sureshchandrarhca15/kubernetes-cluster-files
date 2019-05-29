@@ -1,0 +1,4394 @@
+					-:Kubernetes Multi-Node Cluster Setup:-
+					***************************************
+
+
+
+Lab Setup:
+**********
+
+Hostname				IP Address			RAM				CPU				HDD				NIC					Role
+master.example.com		192.168.0.10		2 GB			2				60	GB			enp0s3				master
+node1.example.com		192.168.0.11		2 GB			2				60	GB			enp0s3				worker
+node2.example.com		192.168.0.12		2 GB			2				60	GB			enp0s3				worker
+node3.example.com		192.168.0.13		2 GB			2				60	GB			enp0s3				worker
+node3.example.com		192.168.0.14		2 GB			2				60	GB			enp0s3				worker
+lb.example.com			192.168.0.15		2 GB			2				60	GB			enp0s3				worker
+nfs.example.com			192.168.0.15		2 GB			2				60	GB			enp0s3				worker
+
+Prepare "master.example.com" Node: 
+*********************************
+
+1. Set the Hostname 
+
+[root@localhost ~]# hostnamectl set-hostname --static master.example.com
+[root@master ~]# bash
+
+[root@master ~]# hostname
+master.example.com
+
+
+2. Configure IP Address 
+
+[root@master ~]# vim /etc/sysconfig/network-scripts/ifcfg-enp0s3
+
+TYPE="Ethernet"
+BOOTPROTO="none"
+DEFROUTE="yes"
+IPV6INIT="no"
+NAME="enp0s3"
+DEVICE="enp0s3"
+ONBOOT="yes"
+IPADDR="192.168.0.10"
+PREFIX="24"
+GATEWAY="192.168.0.1"
+DNS1="192.168.0.1"
+
+
+:wq (save and exit) 
+
+
+[root@master ~]# nmcli connection down enp0s3
+[root@master ~]# nmcli connection reload
+[root@master ~]# nmcli connection up enp0s3
+
+[root@master ~]# ifconfig enp0s3
+enp0s3: flags=4163<UP,BROADCAST,RUNNING,MULTICAST>  mtu 1500
+        inet 192.168.0.10  netmask 255.255.255.0  broadcast 192.168.0.255
+        inet6 fe80::a00:27ff:fe80:132b  prefixlen 64  scopeid 0x20<link>
+        ether 08:00:27:80:13:2b  txqueuelen 1000  (Ethernet)
+        RX packets 430  bytes 39885 (38.9 KiB)
+        RX errors 0  dropped 0  overruns 0  frame 0
+        TX packets 293  bytes 42939 (41.9 KiB)
+        TX errors 0  dropped 0 overruns 0  carrier 0  collisions 0
+
+
+
+3. Configure /etc/hosts file to resolve hostnames
+
+[root@master ~]# vim /etc/hosts
+
+192.168.0.10    master.example.com      master
+192.168.0.11    node1.example.com       node1
+192.168.0.12    node2.example.com       node2
+192.168.0.13    node3.example.com       node3
+192.168.0.14    node4.example.com       node4
+192.168.0.15    lb.example.com          lb
+192.168.0.15    nfs.example.com         nfs
+
+
+:wq (save and exit) 
+
+
+4. Stop and Disable firewalld Service 
+
+[root@master ~]# systemctl stop firewalld
+[root@master ~]# systemctl disable firewalld
+
+
+5. Change SELinux Mode to permissive 
+
+[root@master ~]# vim /etc/sysconfig/selinux
+
+SELINUX=permissive
+
+:wq (save and exit) 
+
+[root@master ~]# setenforce 0
+[root@master ~]# getenforce
+Permissive
+
+6. Verify the connectivity with Hostname:
+
+[root@master ~]# ping -c 3 master.example.com
+PING master.example.com (192.168.0.10) 56(84) bytes of data.
+64 bytes from master.example.com (192.168.0.10): icmp_seq=1 ttl=64 time=0.043 ms
+64 bytes from master.example.com (192.168.0.10): icmp_seq=2 ttl=64 time=0.054 ms
+64 bytes from master.example.com (192.168.0.10): icmp_seq=3 ttl=64 time=0.061 ms
+
+--- master.example.com ping statistics ---
+3 packets transmitted, 3 received, 0% packet loss, time 2000ms
+rtt min/avg/max/mdev = 0.043/0.052/0.061/0.011 ms
+
+
+7. Verify the connectivity with Internet 
+
+[root@master ~]# ping -c 3 www.google.com
+PING www.google.com (216.58.201.228) 56(84) bytes of data.
+64 bytes from fra02s18-in-f4.1e100.net (216.58.201.228): icmp_seq=1 ttl=45 time=370 ms
+64 bytes from fra02s18-in-f4.1e100.net (216.58.201.228): icmp_seq=2 ttl=45 time=668 ms
+64 bytes from fra02s18-in-f4.1e100.net (216.58.201.228): icmp_seq=3 ttl=45 time=899 ms
+
+--- www.google.com ping statistics ---
+3 packets transmitted, 3 received, 0% packet loss, time 2001ms
+rtt min/avg/max/mdev = 370.329/646.163/899.246/216.527 ms
+
+
+8. Create a Directory and Download Kubernetes Packages in it. 
+
+[root@master ~]# mkdir /kubernetes-packages
+[root@master ~]# cd /kubernetes-packages
+[root@master kubernetes-packages]# wget https://cbs.centos.org/kojifiles/packages/kubernetes/1.10.0/1.el7/x86_64/kubernetes-1.10.0-1.el7.x86_64.rpm
+[root@master kubernetes-packages]# wget https://cbs.centos.org/kojifiles/packages/kubernetes/1.10.0/1.el7/x86_64/kubernetes-client-1.10.0-1.el7.x86_64.rpm
+[root@master kubernetes-packages]# wget https://cbs.centos.org/kojifiles/packages/kubernetes/1.10.0/1.el7/x86_64/kubernetes-kubeadm-1.10.0-1.el7.x86_64.rpm
+[root@master kubernetes-packages]# wget https://cbs.centos.org/kojifiles/packages/kubernetes/1.10.0/1.el7/x86_64/kubernetes-master-1.10.0-1.el7.x86_64.rpm
+[root@master kubernetes-packages]# wget https://cbs.centos.org/kojifiles/packages/kubernetes/1.10.0/1.el7/x86_64/kubernetes-node-1.10.0-1.el7.x86_64.rpm
+[root@master kubernetes-packages]# wget https://cbs.centos.org/kojifiles/packages/kubernetes/1.10.0/1.el7/x86_64/kubernetes-unit-test-1.10.0-1.el7.x86_64.rpm
+
+[root@master kubernetes-packages]# ll
+total 132116
+-rw-r--r--. 1 root root    41516 Mar 29  2018 kubernetes-1.10.0-1.el7.x86_64.rpm
+-rw-r--r--. 1 root root 25900832 Mar 29  2018 kubernetes-client-1.10.0-1.el7.x86_64.rpm
+-rw-r--r--. 1 root root 17904640 Mar 29  2018 kubernetes-kubeadm-1.10.0-1.el7.x86_64.rpm
+-rw-r--r--. 1 root root 44024640 Mar 29  2018 kubernetes-master-1.10.0-1.el7.x86_64.rpm
+-rw-r--r--. 1 root root 25559584 Mar 29  2018 kubernetes-node-1.10.0-1.el7.x86_64.rpm
+-rw-r--r--. 1 root root 21837292 Mar 29  2018 kubernetes-unit-test-1.10.0-1.el7.x86_64.rpm
+
+
+9. Create Yum Repository Indexing for the above Packages: 
+
+[root@master kubernetes-packages]# yum install createrepo -y
+[root@master kubernetes-packages]# createrepo -v /kubernetes-packages/
+
+[root@master kubernetes-packages]# ls -l /kubernetes-packages/
+total 132120
+-rw-r--r--. 1 root root    41516 Mar 29  2018 kubernetes-1.10.0-1.el7.x86_64.rpm
+-rw-r--r--. 1 root root 25900832 Mar 29  2018 kubernetes-client-1.10.0-1.el7.x86_64.rpm
+-rw-r--r--. 1 root root 17904640 Mar 29  2018 kubernetes-kubeadm-1.10.0-1.el7.x86_64.rpm
+-rw-r--r--. 1 root root 44024640 Mar 29  2018 kubernetes-master-1.10.0-1.el7.x86_64.rpm
+-rw-r--r--. 1 root root 25559584 Mar 29  2018 kubernetes-node-1.10.0-1.el7.x86_64.rpm
+-rw-r--r--. 1 root root 21837292 Mar 29  2018 kubernetes-unit-test-1.10.0-1.el7.x86_64.rpm
+drwxr-xr-x. 2 root root     4096 Dec 24 12:06 repodata
+
+NOTE: You should have the "repodata" folder in the "kubernetes-packages" Directory after running the "createrepo" command 
+
+10. Configure Yum Repo file to use this Repository Index to Install Kubernetes Packages 
+
+[root@master ~]# vim /etc/yum.repos.d/kubernetes.repo
+
+[kubernetes]
+name=Kuberenetes Version 1.10.0 Repo
+baseurl=file:///kubernetes-packages/
+enabled=1
+gpgcheck=0
+
+
+:wq (save and exit) 
+
+11. Verify the Repository is available on this system to Install Kubernetes Packages:
+
+[root@master ~]# yum clean all
+[root@master ~]# yum repolist
+Loaded plugins: fastestmirror, langpacks
+Loading mirror speeds from cached hostfile
+ * base: centos.mirror.snu.edu.in
+ * extras: centos.mirror.snu.edu.in
+ * updates: centos.mirror.snu.edu.in
+repo id                                      repo name                              status
+ansible                                      Ansible Repo                           64
+base/7/x86_64                                CentOS-7 - Base                        10,019
+extras/7/x86_64                              CentOS-7 - Extras                      321
+kubernetes                                   Kuberenetes Version 1.10.0 Repo        6
+updates/7/x86_64                             CentOS-7 - Updates                     624
+repolist: 11,034
+
+
+12. Update the system
+
+[root@master ~]# yum update -y
+
+
+13. Check if the new kernel has Installed or not 
+
+[root@master ~]# KERNEL_NEW=$(rpm -q kernel --last |head -1 | awk '{print $1}' | sed 's/kernel-//') ; KERNEL_CURRENT=$(uname -r) ; if [[ $KERNEL_NEW != $KERNEL_CURRENT ]]; then echo "reboot_needed"; else echo "reboot_not_needed"; fi
+
+14. If the #13 command display "reboot_needed" output then you need to reboot the system otherwise no need to reboot the system. 
+
+[root@master ~]# reboot
+
+
+
+
+
+
+Please follow the steps from #1 to #14 to prepare the node1, node2, node3 and node4 nodes
+Don't forget to change node specific setting such as IP Address and hostname. 
+
+
+ 
+
+
+
+								Install and Configure etcd on master Node
+								#########################################
+
+1. Install etcd Package 
+
+[root@master ~]# yum install etcd -y 
+
+
+2. Configure etcd.conf as following: 
+
+[root@master ~]# vim /etc/etcd/etcd.conf 
+
+ETCD_NAME=default
+ETCD_DATA_DIR="/var/lib/etcd/default.etcd"
+
+ETCD_LISTEN_CLIENT_URLS="http://0.0.0.0:2379"
+
+ETCD_ADVERTISE_CLIENT_URLS="http://0.0.0.0:2379"
+
+:wq (save and exit) 
+
+3. Start and Enable etcd service
+
+[root@master ~]# systemctl start etcd 
+[root@master ~]# systemctl enable  etcd 
+[root@master ~]# systemctl status etcd 
+
+
+4. Verify ‘/etc/etcd/etcd.conf’ Configuration File
+
+[root@master ~]# grep -v ^# /etc/etcd/etcd.conf 
+
+
+5. Install and Configure Flannel Service 
+
+[root@master ~]# vim flannel-config-vxlan.json
+
+{
+"Network": "10.172.29.0/16",
+"SubnetLen": 24,
+"Backend": {
+
+  "Type": "vxlan",
+  "VNI": 1
+}
+}
+
+:wq (save and exit) 
+
+
+
+6. Upload Flannel configuration to etcd Database
+
+[root@master ~]# etcdctl set /atomic.io/network/config < flannel-config-vxlan.json 
+
+
+
+7. Now verify the etcd datastore
+
+[root@master ~]# etcdctl get /atomic.io/network/config
+
+
+8. Verify it using Kubernetes Master Hostname or  IP address from all the nodes.
+
+[root@master ~]# curl -L http://master.example.com:2379/v2/keys/atomic.io/network/config
+
+[root@node1 ~]# curl -L http://master.example.com:2379/v2/keys/atomic.io/network/config
+
+[root@node2 ~]# curl -L http://master.example.com:2379/v2/keys/atomic.io/network/config
+
+[root@node3 ~]# curl -L http://master.example.com:2379/v2/keys/atomic.io/network/config
+
+[root@node4 ~]# curl -L http://master.example.com:2379/v2/keys/atomic.io/network/config
+
+
+
+
+								Install and Configure flanneld Services on "master.example.com" Node: 
+								#####################################################################
+
+
+
+1. Install and configure flannel and Start & Enable it’s Service
+
+[root@master ~]# yum -y install flannel
+
+[root@master ~]# vim /etc/sysconfig/flanneld 
+
+
+FLANNEL_ETCD_ENDPOINTS="http://master.example.com:2379"
+
+FLANNEL_ETCD_PREFIX="/atomic.io/network"
+
+FLANNEL_OPTIONS="-iface=enp0s3 -public-ip=192.168.0.10 -ip-masq=true"
+
+:wq (save and exit) 
+
+[root@master ~]# systemctl start flanneld
+[root@master ~]# systemctl enable flanneld
+
+[root@master ~]# systemctl status flanneld
+
+[root@master ~]# cat /var/run/flannel/subnet.env
+FLANNEL_NETWORK=10.172.0.0/16
+FLANNEL_SUBNET=10.172.52.1/24
+FLANNEL_MTU=1450
+FLANNEL_IPMASQ=true
+
+
+
+[root@master ~]# ifconfig flannel.1
+flannel.1: flags=4163<UP,BROADCAST,RUNNING,MULTICAST>  mtu 1450
+        inet 10.172.52.0  netmask 255.255.255.255  broadcast 0.0.0.0
+        inet6 fe80::8451:34ff:fe5c:a8a9  prefixlen 64  scopeid 0x20<link>
+        ether 86:51:34:5c:a8:a9  txqueuelen 0  (Ethernet)
+        RX packets 0  bytes 0 (0.0 B)
+        RX errors 0  dropped 0  overruns 0  frame 0
+        TX packets 0  bytes 0 (0.0 B)
+        TX errors 0  dropped 27 overruns 0  carrier 0  collisions 0
+
+
+
+		
+		
+Please follow the above steps to configure Flannel on node1, node2, node3 and node4 Nodes 
+Don't forget to chnage node specific setting such as IP Address and Hostname in config files. 
+
+
+
+		
+									Install Docker Package, Start and Enable docker service on all Nodes 
+									#####################################################################
+
+~]# yum install docker -y 
+~]# systemctl start docker 
+~]# systemctl enable docker
+~]# systemctl status docker
+
+
+
+
+
+									Let’s verify flanneld overlay network connectivity between containers from different nodes
+									###########################################################################################
+
+Launch the Container on master Node and Check Container IP Address
+
+[root@master ~]# docker pull ubuntu
+[root@master ~]# docker run -it -d --name ubuntu-c1 ubuntu 
+[root@master ~]# docker ps 
+[root@master ~]# docker exec -it ubuntu-c1 /bin/bash
+
+Now Install net-tools Package in Ubuntu Container to check the IP Address of it.  
+
+root@3c255900481e:/# apt-get update && apt-get install iputils-ping net-tools -y 
+
+root@3c255900481e:/# ifconfig
+eth0: flags=4163<UP,BROADCAST,RUNNING,MULTICAST>  mtu 1450
+        inet 10.172.52.2  netmask 255.255.255.0  broadcast 0.0.0.0
+        inet6 fe80::42:aff:feac:3402  prefixlen 64  scopeid 0x20<link>
+        ether 02:42:0a:ac:34:02  txqueuelen 0  (Ethernet)
+        RX packets 29810  bytes 17086783 (17.0 MB)
+        RX errors 0  dropped 0  overruns 0  frame 0
+        TX packets 14046  bytes 763455 (763.4 KB)
+        TX errors 0  dropped 0 overruns 0  carrier 0  collisions 0
+
+lo: flags=73<UP,LOOPBACK,RUNNING>  mtu 65536
+        inet 127.0.0.1  netmask 255.0.0.0
+        inet6 ::1  prefixlen 128  scopeid 0x10<host>
+        loop  txqueuelen 1000  (Local Loopback)
+        RX packets 0  bytes 0 (0.0 B)
+        RX errors 0  dropped 0  overruns 0  frame 0
+        TX packets 0  bytes 0 (0.0 B)
+        TX errors 0  dropped 0 overruns 0  carrier 0  collisions 0
+
+
+
+		
+Please note down it’s IP Address "10.172.52.2" as we will test the connectivity from another node to this container using flannel overlay network. 
+
+
+Launch the Container on node1 Node and Check Container IP Address
+
+[root@node1 ~]# docker pull ubuntu
+[root@node1 ~]# docker run -it -d --name ubuntu-c2 ubuntu 
+[root@node1 ~]# docker ps 
+[root@node1 ~]# docker exec -it ubuntu-c2 /bin/bash
+
+Now Install net-tools Package in Ubuntu Container to check the IP Address of it.  
+
+root@a7bdf44ec726:/# apt-get update && apt-get install iputils-ping net-tools -y
+
+root@a7bdf44ec726:/# ifconfig
+eth0: flags=4163<UP,BROADCAST,RUNNING,MULTICAST>  mtu 1450
+        inet 10.172.102.2  netmask 255.255.255.0  broadcast 0.0.0.0
+        inet6 fe80::42:aff:feac:6602  prefixlen 64  scopeid 0x20<link>
+        ether 02:42:0a:ac:66:02  txqueuelen 0  (Ethernet)
+        RX packets 29836  bytes 17087053 (17.0 MB)
+        RX errors 0  dropped 0  overruns 0  frame 0
+        TX packets 12888  bytes 700947 (700.9 KB)
+        TX errors 0  dropped 0 overruns 0  carrier 0  collisions 0
+
+lo: flags=73<UP,LOOPBACK,RUNNING>  mtu 65536
+        inet 127.0.0.1  netmask 255.0.0.0
+        inet6 ::1  prefixlen 128  scopeid 0x10<host>
+        loop  txqueuelen 1000  (Local Loopback)
+        RX packets 0  bytes 0 (0.0 B)
+        RX errors 0  dropped 0  overruns 0  frame 0
+        TX packets 0  bytes 0 (0.0 B)
+        TX errors 0  dropped 0 overruns 0  carrier 0  collisions 0
+
+
+		
+Please note down it’s IP Address "10.172.102.2" as we will test the connectivity from another node to this container using flannel overlay network. 
+
+
+Launch the Container on node2 Node and Check Container IP Address
+
+[root@node2 ~]# docker pull ubuntu
+[root@node2 ~]# docker run -it -d --name ubuntu-c3 ubuntu 
+[root@node2 ~]# docker ps 
+[root@node2 ~]# docker exec -it ubuntu-c3 /bin/bash
+
+Now Install net-tools Package in Ubuntu Container to check the IP Address of it.  
+
+root@6ba5e985f57e:/# apt-get update && apt-get install iputils-ping net-tools -y
+
+root@6ba5e985f57e:/# ifconfig
+root@6ba5e985f57e:/# ifconfig
+eth0: flags=4163<UP,BROADCAST,RUNNING,MULTICAST>  mtu 1450
+        inet 10.172.61.2  netmask 255.255.255.0  broadcast 0.0.0.0
+        inet6 fe80::42:aff:feac:3d02  prefixlen 64  scopeid 0x20<link>
+        ether 02:42:0a:ac:3d:02  txqueuelen 0  (Ethernet)
+        RX packets 29832  bytes 17086717 (17.0 MB)
+        RX errors 0  dropped 0  overruns 0  frame 0
+        TX packets 13515  bytes 734805 (734.8 KB)
+        TX errors 0  dropped 0 overruns 0  carrier 0  collisions 0
+
+lo: flags=73<UP,LOOPBACK,RUNNING>  mtu 65536
+        inet 127.0.0.1  netmask 255.0.0.0
+        inet6 ::1  prefixlen 128  scopeid 0x10<host>
+        loop  txqueuelen 1000  (Local Loopback)
+        RX packets 0  bytes 0 (0.0 B)
+        RX errors 0  dropped 0  overruns 0  frame 0
+        TX packets 0  bytes 0 (0.0 B)
+        TX errors 0  dropped 0 overruns 0  carrier 0  collisions 0
+
+
+
+		
+Please note down it’s IP Address "10.172.61.2" as we will test the connectivity from another node to this container using flannel overlay network. 
+
+
+Master Node Container IP Address: 	10.172.52.2
+Node1 Node Container IP Address:	10.172.102.2
+Node2 Node Container IP Address:	10.172.61.2
+
+Now test the connectivity with each other by using PING command. 
+
+
+NOTE: If you are not able to ping to each other containers, Please use the below command on all nodes and then check the connectivity with PING command again. 
+
+#iptables --policy FORWARD ACCEPT
+
+
+Now delete the containers, Run the below command on all nodes: 
+
+~]# docker rm -f $(docker ps -aq)
+ 
+
+ 
+Congratulations, You have successfully connected between containers with Flannel Overlay Network accross the nodes.  
+
+ 
+ 
+ 
+ 
+									Install and Configure Kubernetes Master "master.example.com" 
+									############################################################
+
+
+
+1. Install the kubernetes-master and kubernetes-client packages
+
+[root@master ~]# yum install -y kubernetes-master kubernetes-client
+
+2. API Server handles the REST operations and acts as a front-end to the cluster’s shared state.
+API Server Configuration is stored at /etc/kubernetes/apiserver.
+Kubernetes uses certificates to authenticate API request. Before configuring API server, we need to generate certificates that can be used for authentication.
+
+Generate a ca.key with 2048bit:
+
+[root@master ~]# mkdir /etc/kubernetes/ssl
+[root@master ~]# cd /etc/kubernetes/ssl/
+[root@master ssl]# openssl genrsa -out ca.key 2048
+
+
+Use the ca.key to generate a ca.crt (use -days to set the certificate effective time):
+
+[root@master ssl]# MASTER_HOSTNAME=$HOSTNAME
+[root@master ssl]# echo $MASTER_HOSTNAME
+[root@master ssl]# openssl req -x509 -new -nodes -key ca.key -subj "/CN=${MASTER_HOSTNAME}" -days 10000 -out ca.crt
+
+
+Generate a api-server.key with 2048bit:
+
+[root@master ssl]# openssl genrsa -out api-server.key 2048
+
+
+Create a config file for generating a Certificate Signing Request (CSR). Be sure to substitute the
+values marked with angle brackets (e.g. <MASTER_HOSTNAME>) with real values before saving this to a file (e.g. csr.conf). 
+
+Note that the value for MASTER_CLUSTER_IP is the service cluster IP for
+the API server as described in previous subsection. The sample below also assume that you are
+using cluster.local as the default DNS domain name.
+
+[root@master ssl]# vim csr.conf 
+
+[ req ]
+default_bits = 2048
+prompt = no
+default_md = sha256
+req_extensions = req_ext
+distinguished_name = dn
+
+[ dn ]
+C = IN
+ST = Delhi
+L = New Delhi
+O = Example, Inc.
+OU = DevOps
+CN =  MASTER_HOSTNAME
+
+[ req_ext ]
+subjectAltName = @alt_names
+
+[ alt_names ]
+DNS.1 = kubernetes
+DNS.2 = kubernetes.default
+DNS.3 = kubernetes.default.svc
+DNS.4 = kubernetes.default.svc.cluster
+DNS.5 = kubernetes.default.svc.cluster.local
+IP.1 =  192.168.0.10
+IP.2 =  10.172.0.1
+
+[ v3_ext ]
+authorityKeyIdentifier=keyid,issuer:always
+basicConstraints=CA:FALSE
+keyUsage=keyEncipherment,dataEncipherment
+extendedKeyUsage=serverAuth,clientAuth
+subjectAltName=@alt_names
+
+:wq (save and exit) 
+
+The MASTER_IP is the real IP Address of master node.
+The MASTER_CLUSTER_IP is usually the first IP from the service CIDR that is specified as the
+--service-cluster-ip-range argument for both the API server and the controller manager component.
+
+
+
+
+Generate the certificate signing request using the above config file:
+
+[root@master ssl]# openssl req -new -key api-server.key -out api-server.csr -config csr.conf 
+
+
+
+Now Sign this CSR cert using ca.key and ca.crt and create a new api-server.crt certificate:
+
+[root@master ssl]# openssl x509 -req -in api-server.csr -CA ca.crt -CAkey ca.key -CAcreateserial -out api-server.crt -days 10000 -extensions v3_ext -extfile csr.conf 
+
+
+
+Verify the certificate:
+
+[root@master ssl]# openssl x509 -noout -text -in api-server.crt 
+
+[root@master ssl]# chmod -R a+rX /etc/kubernetes/ssl/
+
+
+3. Configure the kube-apiserver
+
+[root@master ssl]# vim /etc/kubernetes/apiserver 
+
+# The address on the local server to listen to.
+KUBE_API_ADDRESS="--insecure-bind-address=0.0.0.0"
+
+# The port on the local server to listen on.
+KUBE_API_PORT="--port=8080"
+
+# Port minions listen on
+KUBELET_PORT="--kubelet-port=10250"
+
+# Comma separated list of nodes in the etcd cluster
+KUBE_ETCD_SERVERS="--etcd-servers=http://master.example.com:2379"
+
+# Address range to use for services
+KUBE_SERVICE_ADDRESSES="--service-cluster-ip-range=10.172.0.0/16"
+
+# default admission control policies
+KUBE_ADMISSION_CONTROL="--admission-control=NamespaceLifecycle,LimitRanger,SecurityContextDeny,ServiceAccount,ResourceQuota"
+
+# Add your own!
+KUBE_API_ARGS="--client-ca-file=/etc/kubernetes/ssl/ca.crt --tls-cert-file=/etc/kubernetes/ssl/api-server.crt --tls-private-key-file=/etc/kubernetes/ssl/api-server.key"
+
+:wq (save and exit) 
+
+
+
+
+4. Configure the controller-manager
+
+[root@master ssl]# vim /etc/kubernetes/controller-manager 
+
+KUBE_CONTROLLER_MANAGER_ARGS="--root-ca-file=/etc/kubernetes/ssl/ca.crt --service-account-private-key-file=/etc/kubernetes/ssl/api-server.key"
+
+:wq (save and exit) 
+
+
+
+5. Start the kube-controller-manager, kube-apiserver, kube-scheduler service
+
+[root@master ssl]# systemctl start kube-apiserver
+[root@master ssl]# systemctl start kube-scheduler
+[root@master ssl]# systemctl start kube-controller-manager
+
+[root@master ssl]# systemctl enable kube-apiserver
+[root@master ssl]# systemctl enable kube-scheduler
+[root@master ssl]# systemctl enable kube-controller-manager
+
+[root@master ssl]# systemctl status kube-apiserver
+[root@master ssl]# systemctl status kube-scheduler
+[root@master ssl]# systemctl status kube-controller-manager
+
+
+
+
+6. Verify the installation
+
+[root@master ~]#  kubectl version
+
+Client Version: version.Info{Major:"1", Minor:"10", GitVersion:"v1.10.0", GitCommit:"fc32d2f3698e36b93322a3465f63a14e9f0eaead", GitTreeState:"archive", BuildDate:"2018-03-29T08:38:42Z", GoVersion:"go1.9.2", Compiler:"gc", Platform:"linux/amd64"}
+Server Version: version.Info{Major:"1", Minor:"10", GitVersion:"v1.10.0", GitCommit:"fc32d2f3698e36b93322a3465f63a14e9f0eaead", GitTreeState:"archive", BuildDate:"2018-03-29T08:38:42Z", GoVersion:"go1.9.2", Compiler:"gc", Platform:"linux/amd64"}
+
+
+[root@master ~]# kubectl get namespace
+
+NAME          STATUS    AGE
+default       Active    1m
+kube-public   Active    1m
+kube-system   Active    1m
+
+
+[root@master ~]# kubectl get serviceaccount
+
+NAME      SECRETS   AGE
+default   1         1m
+
+[root@master ~]# kubectl get componentstatus
+
+NAME                 STATUS    MESSAGE              ERROR
+controller-manager   Healthy   ok
+scheduler            Healthy   ok
+etcd-0               Healthy   {"health": "true"}
+
+
+You have successfully configured Kubernetes Master Role on "master.example.com" Node. 
+
+
+
+
+
+
+									Install and Configure Kubernetes Node and Add them into Kubernetes Cluster 
+									###########################################################################
+
+Let’s add node1 into Kubernetes Cluster: 
+
+1. Install kubernetes-node Package
+
+[root@node1 ~]# yum install kubernetes-node -y 
+
+2. Edit config file
+
+[root@node1 ~]# vim /etc/kubernetes/config 
+
+# logging to stderr means we get it in the systemd journal
+KUBE_LOGTOSTDERR="--logtostderr=true"
+
+# journal message level, 0 is debug
+KUBE_LOG_LEVEL="--v=0"
+
+# Should this cluster be allowed to run privileged docker containers
+KUBE_ALLOW_PRIV="--allow-privileged=false"
+
+# How the controller-manager, scheduler, and proxy find the apiserver
+KUBE_MASTER="--master=http://master.example.com:8080"
+
+:(save and exit) 
+
+
+
+
+3. Configure the kubelet
+
+[root@node1 ~]# vim /etc/kubernetes/kubelet 
+
+# kubernetes kubelet (minion) config
+
+# The address for the info server to serve on (set to 0.0.0.0 or "" for all interfaces)
+KUBELET_ADDRESS="--address=0.0.0.0"
+
+# The port for the info server to serve on
+KUBELET_PORT="--port=10250"
+
+# You may leave this blank to use the actual hostname
+KUBELET_HOSTNAME="--hostname-override=node1.example.com"
+
+# Add your own!
+KUBELET_ARGS="--cgroup-driver=systemd --fail-swap-on=false --kubeconfig=/etc/kubernetes/master-kubeconfig.yaml --cluster-dns=10.172.0.10 --cluster-domain=cluster.local"
+
+:wq (save and exit) 
+
+
+
+
+Create or Edit /etc/kubernetes/master-kubeconfig.yaml to contain the following information:
+
+[root@node1 ~]# vim /etc/kubernetes/master-kubeconfig.yaml
+
+kind: Config
+clusters:
+- name: local
+  cluster:
+    server: http://master.example.com:8080
+users:
+- name: kubelet
+contexts:
+- context:
+    cluster: local
+    user: kubelet
+  name: kubelet-context
+current-context: kubelet-context
+
+:wq (save and exit) 
+
+
+
+Start the appropriate services on the node
+
+[root@node1 ~]# systemctl start kube-proxy 
+[root@node1 ~]# systemctl start kubelet
+
+[root@node1 ~]# systemctl enable kube-proxy 
+[root@node1 ~]# systemctl enable kubelet
+
+[root@node1 ~]# systemctl status kube-proxy 
+[root@node1 ~]# systemctl status kubelet
+
+
+
+Now got  to master node and get the node list. 
+
+
+[root@master ~]# kubectl get nodes
+
+NAME                STATUS    ROLES     AGE       VERSION
+node1.example.com   Ready     <none>    1m        v1.10.0
+
+
+
+Please follow the above steps to add node2, node3 and node4 nodes into Kubernetes Cluster 
+Don't forget to change node specific setting such as IP address and hostname in to config files. 
+
+
+
+Now Check to make sure now the cluster can see the node1, node2, node3 and node4 nodes. 
+
+[root@master ~]# kubectl get nodes
+NAME                STATUS    ROLES     AGE       VERSION
+node1.example.com   Ready     <none>    15m        v1.10.0
+node2.example.com   Ready     <none>    1m        v1.10.0
+
+
+
+
+
+
+You have successfully configured Kubernetes Cluster with One Master and Two Worker Nodes. 
+
+
+
+#####################################################################
+#																	#
+#			Mark my-node as unschedulable							#
+#																	#
+# 			kubectl cordon my-node									#
+#																	#
+#			Mark my-node as schedulable								#
+#																	#			
+#			kubectl uncordon my-node								#
+#																	#
+#####################################################################
+
+
+
+
+												Deploy CoreDNS AddOns on Kubernets Cluster 
+												###########################################
+
+1. Create a Service Account 
+
+[root@master ingress]# vim coredns-sa.yml
+
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: coredns
+  namespace: kube-system
+
+ :wq (save and exit) 
+ 
+
+[root@master ingress]# kubectl apply -f coredns-sa.yml
+
+[root@master ingress]# kubectl get sa -n kube-system
+
+NAME      SECRETS   AGE
+coredns   1         22m
+default   1         35m
+
+
+2. Create ClusterRole and ClusterBindingRole 
+
+[root@master ingress]# vim coredns-clusterrole.yml
+
+apiVersion: rbac.authorization.k8s.io/v1beta1
+kind: ClusterRole
+metadata:
+  labels:
+    kubernetes.io/bootstrapping: rbac-defaults
+  name: system:coredns
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - endpoints
+  - services
+  - pods
+  - namespaces
+  verbs:
+  - list
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - nodes
+  verbs:
+  - get
+
+---
+apiVersion: rbac.authorization.k8s.io/v1beta1
+kind: ClusterRoleBinding
+metadata:
+  annotations:
+    rbac.authorization.kubernetes.io/autoupdate: "true"
+  labels:
+    kubernetes.io/bootstrapping: rbac-defaults
+  name: system:coredns
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:coredns
+subjects:
+- kind: ServiceAccount
+  name: coredns
+  namespace: kube-system
+
+
+:wq (save and exit) 
+
+[root@master ingress]# kubectl apply -f coredns-clusterrole.yml
+
+[root@master ingress]# kubectl get clusterroles
+
+NAME             AGE
+system:coredns   27m
+
+[root@master ingress]# kubectl get clusterrolebinding
+
+NAME             AGE
+system:coredns   27m
+
+
+[root@master ingress]# kubectl describe clusterroles system:coredns
+
+Name:         system:coredns
+Labels:       kubernetes.io/bootstrapping=rbac-defaults
+Annotations:  kubectl.kubernetes.io/last-applied-configuration={"apiVersion":"rbac.authorization.k8s.io/v1beta1","kind":"ClusterRole","metadata":{"annotations":{},"labels":{"kubernetes.io/bootstrapping":"rbac-defau...
+PolicyRule:
+  Resources   Non-Resource URLs  Resource Names  Verbs
+  ---------   -----------------  --------------  -----
+  endpoints   []                 []              [list watch]
+  namespaces  []                 []              [list watch]
+  nodes       []                 []              [get]
+  pods        []                 []              [list watch]
+  services    []                 []              [list watch]
+
+  
+  [root@master ingress]# kubectl describe clusterrolebinding system:coredns
+Name:         system:coredns
+Labels:       kubernetes.io/bootstrapping=rbac-defaults
+Annotations:  kubectl.kubernetes.io/last-applied-configuration={"apiVersion":"rbac.authorization.k8s.io/v1beta1","kind":"ClusterRoleBinding","metadata":{"annotations":{"rbac.authorization.kubernetes.io/autoupdate":...
+              rbac.authorization.kubernetes.io/autoupdate=true
+Role:
+  Kind:  ClusterRole
+  Name:  system:coredns
+Subjects:
+  Kind            Name     Namespace
+  ----            ----     ---------
+  ServiceAccount  coredns  kube-system
+
+
+3. Create Config Map for CoreDNS 
+
+[root@master ingress]# vim coredns-configmap.yml
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: coredns
+  namespace: kube-system
+data:
+  Corefile: |
+    .:53 {
+        errors
+        log stdout
+        health
+        kubernetes cluster.local 10.172.0.0/16
+        proxy . /etc/resolv.conf
+        cache 30
+    }
+
+:wq (save and exit) 
+
+#################################################################################################
+#	NOTE: Please use "10.172.0.0/16" subnet range as per your cluster. 							#
+#	You can get it from the /etc/kubernetes/apiserver file as following: 						#
+#																								#
+#	[root@master ingress]# cat /etc/kubernetes/apiserver | grep service-cluster-ip-range		#
+#	KUBE_SERVICE_ADDRESSES="--service-cluster-ip-range=10.172.0.0/16"							#
+#																								#
+#																								#
+#################################################################################################
+ 
+ 
+[root@master ingress]# kubectl apply -f coredns-configmap.yml
+
+[root@master ingress]# kubectl get cm -n kube-system
+
+NAME                                 DATA      AGE
+coredns                              1         36m
+extension-apiserver-authentication   1         48m
+
+
+4. Create CoreDNS Deployment 
+
+[root@master ingress]# vim coredns-deployment.yml
+
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  name: coredns
+  namespace: kube-system
+  labels:
+    k8s-app: coredns
+    kubernetes.io/cluster-service: "true"
+    kubernetes.io/name: "CoreDNS"
+spec:
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+  selector:
+    matchLabels:
+      k8s-app: coredns
+  template:
+    metadata:
+      labels:
+        k8s-app: coredns
+    spec:
+      serviceAccountName: coredns
+      tolerations:
+        - key: "CriticalAddonsOnly"
+          operator: "Exists"
+      nodeSelector:
+        beta.kubernetes.io/os: linux
+      containers:
+      - name: coredns
+        image: coredns/coredns:latest
+        imagePullPolicy: Always
+        resources:
+          limits:
+            memory: 170Mi
+          requests:
+            cpu: 100m
+            memory: 70Mi
+        args: [ "-conf", "/etc/coredns/Corefile" ]
+        volumeMounts:
+        - name: config-volume
+          mountPath: /etc/coredns
+        ports:
+        - containerPort: 53
+          name: dns
+          protocol: UDP
+        - containerPort: 53
+          name: dns-tcp
+          protocol: TCP
+        - containerPort: 9153
+          name: metrics
+          protocol: TCP
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+            scheme: HTTP
+          initialDelaySeconds: 60
+          timeoutSeconds: 5
+          successThreshold: 1
+          failureThreshold: 5
+      dnsPolicy: Default
+      volumes:
+        - name: config-volume
+          configMap:
+            name: coredns
+            items:
+            - key: Corefile
+              path: Corefile
+
+:wq (save and exit)
+
+
+[root@master ingress]# kubectl apply -f coredns-deployment.yml
+
+[root@master ingress]# kubectl get deploy -n kube-system
+
+NAME      DESIRED   CURRENT   UP-TO-DATE   AVAILABLE   AGE
+coredns   1         1         1            1           40m
+
+[root@master coredns]# kubectl get pods -n kube-system
+
+NAME                       READY     STATUS    RESTARTS   AGE
+coredns-847f5c8745-842xh   1/1       Running   0          24s
+
+
+
+
+5. Create CoreDNS Service 
+
+[root@master ingress]# vim coredns-service.yml
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: coredns
+  namespace: kube-system
+  labels:
+    k8s-app: coredns
+    kubernetes.io/cluster-service: "true"
+    kubernetes.io/name: "CoreDNS"
+spec:
+  selector:
+    k8s-app: coredns
+  clusterIP: 10.172.0.10
+  ports:
+  - name: dns
+    port: 53
+    protocol: UDP
+  - name: dns-tcp
+    port: 53
+    protocol: TCP
+  - name: metrics
+    port: 9153
+    protocol: TCP
+
+
+:wq (save and exit) 
+
+
+#################################################################################################
+#									NOTE: 														#
+#	As we have configured 10.172.0.0/16" Subnet Range for Cluster Service						#
+#	I am using "10.172.0.10" IP Address from this subnet range for CoreDNS Service				#
+#	You can use other IP Address as per your choise 					 						#
+#																								#
+#################################################################################################
+
+[root@master ingress]# kubectl apply -f coredns-service.yml
+
+[root@master ingress]# kubectl get svc -n kube-system
+NAME      TYPE        CLUSTER-IP    EXTERNAL-IP   PORT(S)                  AGE
+coredns   ClusterIP   10.172.0.10   <none>        53/UDP,53/TCP,9153/TCP   52m
+
+[root@master ingress]# kubectl describe svc coredns  -n kube-system
+
+Name:              coredns
+Namespace:         kube-system
+Labels:            k8s-app=coredns
+                   kubernetes.io/cluster-service=true
+                   kubernetes.io/name=CoreDNS
+Annotations:       kubectl.kubernetes.io/last-applied-configuration={"apiVersion":"v1","kind":"Service","metadata":{"annotations":{},"labels":{"k8s-app":"coredns","kubernetes.io/cluster-service":"true","kubernetes.io/na...
+Selector:          k8s-app=coredns
+Type:              ClusterIP
+IP:                10.172.0.10
+Port:              dns  53/UDP
+TargetPort:        53/UDP
+Endpoints:         10.172.95.2:53
+Port:              dns-tcp  53/TCP
+TargetPort:        53/TCP
+Endpoints:         10.172.95.2:53
+Port:              metrics  9153/TCP
+TargetPort:        9153/TCP
+Endpoints:         10.172.95.2:9153
+Session Affinity:  None
+Events:            <none>
+
+
+
+6. Let's Verify the CoreDNS Service 
+
+Firs you need to make sure that kubelet service have --cluster-dns and --cluster-domain perameters in config file as below on all nodes: 
+
+[root@node3 ~]# cat /etc/kubernetes/kubelet | grep KUBELET_ARGS
+KUBELET_ARGS="--cgroup-driver=systemd --fail-swap-on=false --kubeconfig=/etc/kubernetes/master-kubeconfig.yaml --cluster-dns=10.172.0.10 --cluster-domain=cluster.local"
+
+If --cluster-dns and --cluster-domain is not present in config file, please put it into kubelet config file as above and restart the below services: 
+
+[root@node3 ~]# systemctl restart kubelet kube-proxy
+
+
+Now run a dnstools Pod to verify the CoreDNS 
+
+[root@master ~]# vim dnstool.yml
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: dnstool
+  namespace: default
+spec:
+  containers:
+  - image: infoblox/dnstools:latest
+    command:
+    - sleep
+    - "3600"
+    imagePullPolicy: IfNotPresent
+    name: dnstool
+  restartPolicy: Always
+
+:wq (save and exit) 
+
+
+[root@master ~]# kubectl apply -f dnstool.yml
+pod "dnstool" created
+
+[root@master ~]# kubectl exec -it dnstool /bin/sh
+
+dnstools# host kubernetes
+kubernetes.default.svc.cluster.local has address 10.172.0.1
+
+dnstools# host coredns.kube-system
+coredns.kube-system.svc.cluster.local has address 10.172.0.10
+
+dnstools# host 10.172.0.1
+1.0.172.10.in-addr.arpa domain name pointer kubernetes.default.svc.cluster.local.
+
+dnstools# host 10.172.0.10
+10.0.172.10.in-addr.arpa domain name pointer coredns.kube-system.svc.cluster.local.
+
+dnstools# nslookup kubernetes
+Server:         10.172.0.10
+Address:        10.172.0.10#53
+
+Name:   kubernetes.default.svc.cluster.local
+Address: 10.172.0.1
+
+dnstools# nslookup  coredns.kube-system
+Server:         10.172.0.10
+Address:        10.172.0.10#53
+
+Name:   coredns.kube-system.svc.cluster.local
+Address: 10.172.0.10
+
+dnstools# exit
+
+
+Congratulations, You have successfully Deployed CoreDNS on Kubernetes Cluster. 
+
+
+
+
+
+
+			Now let's launch nginx with 2 replicas and resolve it's service name with CoreDNS Add-On Service
+			#################################################################################################
+
+[root@master ~]# vim nginx-rc.yml
+
+apiVersion: v1
+kind: ReplicationController
+metadata:
+  name: nginxi-1.7.9
+spec:
+  replicas: 2
+  selector:
+    app: nginx
+    service: web
+    version: "1.7.9"
+  template:
+    metadata:
+      name: nginx
+      labels:
+        app: nginx
+        service: web
+        version: "1.7.9"
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:1.7.9
+        ports:
+        - containerPort: 80
+
+
+:wq (save and exit) 
+
+
+[root@master ~]# kubectl apply -f nginx-rc.yml
+replicationcontroller "nginxi-1.7.9" created
+
+[root@master ~]# kubectl get pods
+NAME                 READY     STATUS    RESTARTS   AGE
+nginxi-1.7.9-22k7j   1/1       Running   0          24s
+nginxi-1.7.9-44dr6   1/1       Running   0          24s
+
+[root@master ~]# kubectl get rc
+NAME           DESIRED   CURRENT   READY     AGE
+nginxi-1.7.9   2         2         2         47s
+
+
+[root@master ~]# vim nginx-service.yml
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-service
+spec:
+  selector:
+    app: nginx
+    service: web
+    version: "1.7.9"
+  ports:
+  - protocol: TCP
+    port: 80
+    targetPort: 80
+    name: http
+
+
+:wq (save and exit)
+
+[root@master ~]# kubectl apply -f nginx-service.yml
+service "nginx-service" created
+
+
+[root@master ~]# kubectl  get svc
+NAME            TYPE        CLUSTER-IP     EXTERNAL-IP   PORT(S)   AGE
+kubernetes      ClusterIP   10.172.0.1     <none>        443/TCP   1h
+nginx-service   ClusterIP   10.172.0.227   <none>        80/TCP    26s
+
+[root@master ~]# kubectl describe svc nginx-service
+Name:              nginx-service
+Namespace:         default
+Labels:            <none>
+Annotations:       kubectl.kubernetes.io/last-applied-configuration={"apiVersion":"v1","kind":"Service","metadata":{"annotations":{},"name":"nginx-service","namespace":"default"},"spec":{"ports":[{"name":"http","port":8...
+Selector:          app=nginx,service=web,version=1.7.9
+Type:              ClusterIP
+IP:                10.172.0.227
+Port:              http  80/TCP
+TargetPort:        80/TCP
+Endpoints:         10.172.27.2:80,10.172.95.3:80
+Session Affinity:  None
+Events:            <none>
+
+
+
+[root@master ~]# kubectl exec -it dnstool /bin/sh
+
+
+dnstools# nslookup nginx-service
+Server:         10.172.0.10
+Address:        10.172.0.10#53
+
+Name:   nginx-service.default.svc.cluster.local
+Address: 10.172.0.227
+
+dnstools# nslookup 10.172.0.227
+227.0.172.10.in-addr.arpa       name = nginx-service.default.svc.cluster.local.
+
+
+dnstools# curl http://nginx-service
+
+
+dnstools# exit
+
+[root@master ~]# kubectl  get svc
+NAME            TYPE        CLUSTER-IP     EXTERNAL-IP   PORT(S)   AGE
+kubernetes      ClusterIP   10.172.0.1     <none>        443/TCP   1h
+nginx-service   ClusterIP   10.172.0.227   <none>        80/TCP    10m
+
+
+NOTE: Please verify the "nginx-service" Cluster IP and "nslookup" IP for nginx-service. 
+
+
+You have just accessed the nginx-service by using the name which is resolved from CoreDNS 
+
+
+
+
+
+
+
+							Deploy NGINX Ingress Controller in Kubernetes cluster to expose App access to External World
+							#############################################################################################
+
+1. First create a namespace named ingress-nginx, the relevant components of ingress-nginx will be under this namespace.
+
+[root@master ingress-controller]# vim namespace.yaml
+
+---
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ingress-nginx
+
+:wq (save and exit) 
+
+
+
+[root@master ingress-controller]# kubectl create -f namespace.yaml
+namespace "ingress-nginx" created
+
+
+
+2.  create default-http-backendthe Deployment and Service.
+
+[root@master ingress-controller]# vim default-backend.yaml
+
+---
+
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  name: default-http-backend
+  labels:
+    app: default-http-backend
+  namespace: ingress-nginx
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: default-http-backend
+  template:
+    metadata:
+      labels:
+        app: default-http-backend
+    spec:
+      terminationGracePeriodSeconds: 60
+      containers:
+      - name: default-http-backend
+        image: gcr.io/google_containers/defaultbackend:1.4
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8080
+            scheme: HTTP
+          initialDelaySeconds: 30
+          timeoutSeconds: 5
+        ports:
+        - containerPort: 8080
+        resources:
+          limits:
+            cpu: 10m
+            memory: 20Mi
+          requests:
+            cpu: 10m
+            memory: 20Mi
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: default-http-backend
+  namespace: ingress-nginx
+  labels:
+    app: default-http-backend
+spec:
+  ports:
+  - port: 80
+    targetPort: 8080
+  selector:
+    app: default-http-backend
+
+:wq (save and exit) 
+
+
+
+[root@master ingress-controller]# kubectl apply -f default-backend.yaml
+deployment.extensions "default-http-backend" created
+service "default-http-backend" created
+
+
+
+[root@master ingress-controller]# kubectl get svc,deploy,pod -n ingress-nginx
+NAME                   TYPE        CLUSTER-IP     EXTERNAL-IP   PORT(S)   AGE
+default-http-backend   ClusterIP   10.172.0.233   <none>        80/TCP    40s
+
+NAME                   DESIRED   CURRENT   UP-TO-DATE   AVAILABLE   AGE
+default-http-backend   1         1         1            1           41s
+
+NAME                                   READY     STATUS    RESTARTS   AGE
+default-http-backend-5c6d95c48-jks66   1/1       Running   0          39s
+
+
+
+
+3. create nginx-configuration, tcp-services, and udp-servicesthree ConfigMaps:
+
+[root@master ingress-controller]# vim configmap.yaml
+
+---
+
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  name: nginx-configuration
+  namespace: ingress-nginx
+  labels:
+    app: ingress-nginx
+data:
+  use-proxy-protocol: "true"
+
+:wq (save and exit) 
+
+[root@master ingress-controller]# kubectl apply -f configmap.yaml
+configmap "nginx-configuration" created
+
+
+[root@master ingress-controller]# vim udp-services-configmap.yaml
+
+---
+
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  name: udp-services
+  namespace: ingress-nginx
+
+  
+:wq (save and exit) 
+
+
+
+[root@master ingress-controller]# kubectl apply -f udp-services-configmap.yaml
+configmap "udp-services" created
+
+
+
+[root@master ingress-controller]# vim tcp-services-configmap.yaml
+
+---
+
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  name: tcp-services
+  namespace: ingress-nginx
+
+:wq (save and exit) 
+
+[root@master ingress-controller]# kubectl apply -f tcp-services-configmap.yaml
+configmap "tcp-services" created
+
+
+
+[root@master ingress-controller]# kubectl get cm -n ingress-nginx
+NAME                  DATA      AGE
+nginx-configuration   0         1m
+tcp-services          0         17s
+udp-services          0         56s
+
+
+
+
+4. create a ServiceAccount nginx-ingress-serviceaccountand create the associated ClusterRole, Role, ClusterRoleBinding, RoleBinding to authorize it:
+
+[root@master ingress-controller]# vim rbac.yaml
+
+---
+
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: nginx-ingress-serviceaccount
+  namespace: ingress-nginx
+
+---
+
+apiVersion: rbac.authorization.k8s.io/v1beta1
+kind: ClusterRole
+metadata:
+  name: nginx-ingress-clusterrole
+rules:
+  - apiGroups:
+      - ""
+    resources:
+      - configmaps
+      - endpoints
+      - nodes
+      - pods
+      - secrets
+    verbs:
+      - list
+      - watch
+  - apiGroups:
+      - ""
+    resources:
+      - nodes
+    verbs:
+      - get
+  - apiGroups:
+      - ""
+    resources:
+      - services
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - "extensions"
+    resources:
+      - ingresses
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - ""
+    resources:
+        - events
+    verbs:
+        - create
+        - patch
+  - apiGroups:
+      - "extensions"
+    resources:
+      - ingresses/status
+    verbs:
+      - update
+
+---
+
+apiVersion: rbac.authorization.k8s.io/v1beta1
+kind: Role
+metadata:
+  name: nginx-ingress-role
+  namespace: ingress-nginx
+rules:
+  - apiGroups:
+      - ""
+    resources:
+      - configmaps
+      - pods
+      - secrets
+      - namespaces
+    verbs:
+      - get
+  - apiGroups:
+      - ""
+    resources:
+      - configmaps
+    resourceNames:
+      - "ingress-controller-leader-nginx"
+    verbs:
+      - get
+      - update
+  - apiGroups:
+      - ""
+    resources:
+      - configmaps
+    verbs:
+      - create
+  - apiGroups:
+      - ""
+    resources:
+      - endpoints
+    verbs:
+      - get
+
+---
+
+apiVersion: rbac.authorization.k8s.io/v1beta1
+kind: RoleBinding
+metadata:
+  name: nginx-ingress-role-nisa-binding
+  namespace: ingress-nginx
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: nginx-ingress-role
+subjects:
+  - kind: ServiceAccount
+    name: nginx-ingress-serviceaccount
+    namespace: ingress-nginx
+
+---
+
+apiVersion: rbac.authorization.k8s.io/v1beta1
+kind: ClusterRoleBinding
+metadata:
+  name: nginx-ingress-clusterrole-nisa-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: nginx-ingress-clusterrole
+subjects:
+  - kind: ServiceAccount
+    name: nginx-ingress-serviceaccount
+    namespace: ingress-nginx
+
+:wq (save and exit) 
+
+
+
+
+[root@master ingress-controller]# kubectl apply -f rbac.yaml
+serviceaccount "nginx-ingress-serviceaccount" created
+clusterrole.rbac.authorization.k8s.io "nginx-ingress-clusterrole" created
+role.rbac.authorization.k8s.io "nginx-ingress-role" created
+rolebinding.rbac.authorization.k8s.io "nginx-ingress-role-nisa-binding" created
+clusterrolebinding.rbac.authorization.k8s.io "nginx-ingress-clusterrole-nisa-binding" created
+
+
+
+
+5. Deploy nginx-ingress-controller
+
+[root@master ingress-controller]# vim nginx-ingress-controller.yaml
+
+---
+
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  name: nginx-ingress-controller
+  namespace: ingress-nginx
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: ingress-nginx
+  template:
+    metadata:
+      labels:
+        app: ingress-nginx
+      annotations:
+        prometheus.io/port: '10254'
+        prometheus.io/scrape: 'true'
+    spec:
+      serviceAccountName: nginx-ingress-serviceaccount
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: kubernetes.io/hostname
+                operator: In
+                values:
+                - node1.example.com
+                - node2.example.com
+      containers:
+        - name: nginx-ingress-controller
+          image: quay.io/kubernetes-ingress-controller/nginx-ingress-controller:0.15.0
+          args:
+            - /nginx-ingress-controller
+            - --default-backend-service=$(POD_NAMESPACE)/default-http-backend
+            - --configmap=$(POD_NAMESPACE)/nginx-configuration
+            - --tcp-services-configmap=$(POD_NAMESPACE)/tcp-services
+            - --udp-services-configmap=$(POD_NAMESPACE)/udp-services
+            - --publish-service=$(POD_NAMESPACE)/ingress-nginx
+            - --annotations-prefix=nginx.ingress.kubernetes.io
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+          ports:
+          - name: http
+            containerPort: 80
+          - name: https
+            containerPort: 443
+          livenessProbe:
+            failureThreshold: 3
+            httpGet:
+              path: /healthz
+              port: 10254
+              scheme: HTTP
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            successThreshold: 1
+            timeoutSeconds: 1
+          readinessProbe:
+            failureThreshold: 3
+            httpGet:
+              path: /healthz
+              port: 10254
+              scheme: HTTP
+            periodSeconds: 10
+            successThreshold: 1
+            timeoutSeconds: 1
+          securityContext:
+            runAsNonRoot: false
+
+:wq (save and exit) 
+
+
+Note that if Deployment config file I am using node selector node1.example.com and node2.example.com to run this pod.
+In your case, maybe you want to use different selector, so please change it accordingly. 
+
+
+
+[root@master ingress-controller]# kubectl apply -f nginx-ingress-controller.yaml
+deployment.extensions "nginx-ingress-controller" created
+
+
+
+[root@master ingress-controller]# kubectl get pods -n ingress-nginx
+NAME                                        READY     STATUS    RESTARTS   AGE
+default-http-backend-5c6d95c48-jks66        1/1       Running   0          16m
+nginx-ingress-controller-56f4d48f5f-nbkrg   1/1       Running   0          6m
+nginx-ingress-controller-56f4d48f5f-nrwq7   1/1       Running   0          6m
+
+
+
+
+6. Exposing nginx-ingress-controller to outside the Kubernetes cluster
+
+[root@master ingress-controller]# vim ingress-nginx.svc.yaml
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: ingress-nginx
+  namespace: ingress-nginx
+spec:
+  externalIPs:
+  - 192.168.0.13
+  - 192.168.0.14
+  ports:
+  - name: http
+    port: 80
+    targetPort: 80
+    protocol: TCP
+  - name: https
+    port: 443
+    targetPort: 443
+    protocol: TCP
+  selector:
+    app: ingress-nginx
+
+:wq (save and exit) 
+
+[root@master ingress-controller]# kubectl apply -f ingress-nginx.svc.yaml
+service "ingress-nginx" created
+
+
+[root@master ingress-controller]# kubectl get svc -n ingress-nginx
+NAME                   TYPE        CLUSTER-IP     EXTERNAL-IP           		PORT(S)          AGE
+default-http-backend   ClusterIP   10.172.0.233   <none>                		80/TCP           18m
+ingress-nginx          ClusterIP   10.172.0.31    192.168.0.13,192.168.0.14   	80/TCP,443/TCP   14s
+
+
+[root@master ingress-controller]# kubectl describe svc ingress-nginx -n ingress-nginx
+Name:              ingress-nginx
+Namespace:         ingress-nginx
+Labels:            <none>
+Annotations:       kubectl.kubernetes.io/last-applied-configuration={"apiVersion":"v1","kind":"Service","metadata":{"annotations":{},"name":"ingress-nginx","namespace":"ingress-nginx"},"spec":{"externalIPs":["192.168.0.13"...
+Selector:          app=ingress-nginx
+Type:              ClusterIP
+IP:                10.172.0.31
+External IPs:      192.168.0.13,192.168.0.14
+Port:              http  80/TCP
+TargetPort:        80/TCP
+Endpoints:         10.172.27.5:80,10.172.95.6:80
+Port:              https  443/TCP
+TargetPort:        443/TCP
+Endpoints:         10.172.27.5:443,10.172.95.6:443
+Session Affinity:  None
+Events:            <none>
+
+
+It can be seen that nginx-ingress-controllerthe 80 and 443 ports of nginx are exposed outside the cluster by 192.168.0.13, 192.168.0.14
+
+Request these two External IPs separately:
+
+curl 192.168.0.13:80
+default backend - 404
+
+curl 192.168.0.14:80
+default backend - 404
+
+
+Since we have not yet created ingress resources in the Kubernetes cluster, requests for these two External IPs are loaded onto the default backend.
+
+
+
+
+
+
+
+
+										Exposing Our Previously Deploy Nginx RC with ingress: 
+										#####################################################	
+
+[root@master ingress]# vim nginx-service-ingress.yaml
+
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  name: nginx
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+spec:
+  rules:
+  - http:
+      paths:
+      - path: 
+        backend:
+          serviceName: nginx-service
+          servicePort: 80
+
+:wq (save and exit) 
+
+
+
+[root@master ingress]# kubectl apply -f nginx-service-ingress.yaml
+ingress.extensions "nginx" created
+
+
+[root@master ingress]# kubectl get ingress
+NAME      HOSTS     ADDRESS   PORTS     AGE
+nginx     *                   80        3s
+
+
+
+Note that, still you don't have IP Address in ADDRESS field, please wait for few second and re-run the above command: 
+
+
+
+[root@master ingress]# kubectl get ingress
+
+NAME      HOSTS     ADDRESS        				  PORTS     AGE
+nginx     *         192.168.0.13,192.168.0.14   80        24s
+
+Now you have IP Address in ADDRESS Field (192.168.0.13,192.168.0.14). Now you can access the web page using (192.168.0.13,192.168.0.14) as below: 
+
+
+
+Now Open the Browser and point to the below URL: 
+
+http://192.168.0.13
+http://192.168.0.14
+
+
+Now Let's convert the above URL into DNS URL, So we need to Modify ingress rules which we have created previously. 
+
+[root@master ingress]# vim nginx-service-ingress.yaml
+
+
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  name: nginx
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+spec:
+  rules:
+  - host: welcome.mynginx-svc.com
+    http:
+      paths:
+      - path: /
+        backend:
+          serviceName: nginx-service
+          servicePort: 80
+
+
+
+:wq (save and exit) 
+
+
+[root@master ingress]# kubectl apply -f nginx-service-ingress.yaml
+ingress.extensions "nginx" configured
+
+
+[root@master ingress]# kubectl get ingress
+NAME      HOSTS                     ADDRESS        				PORTS     AGE
+nginx     welcome.mynginx-svc.com   192.168.0.13,192.168.0.14   80        19m
+
+
+
+Now Open Web Browser and point to the mentioned URL but before that, we need to configure hosts file to resolve hostname as we don't have DNS Configured yet. 
+
+if you are using Windows Machine to access the URL, add the below line
+
+Open c:\Windows\System32\drivers\etc\hosts in notepad as Admin 
+
+192.168.0.13	welcome.mynginx-svc.com
+192.168.0.14	welcome.mynginx-svc.com
+
+
+if you are using Linux | UNIX Machine to access the URL, add the below line
+
+Open /etc/hosts in vi|vim 
+
+192.168.0.13	welcome.mynginx-svc.com
+192.168.0.14	welcome.mynginx-svc.com
+
+
+Now Open Web Browser and point to the http://welcome.mynginx-svc.com 
+
+
+ 
+
+
+
+									Exposing the another HTTP service to the outside of the cluster using Ingress
+									##############################################################################
+
+1. Create a test namespace 
+
+[root@master ingress-app-example]# vim namespace-test.yaml
+
+---
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: test
+
+:wq (save and exit) 
+
+[root@master ingress-app-example]# kubectl apply -f namespace-test.yaml
+namespace "test" created
+
+
+
+
+2. Deploy a simple http service in a k8s cluster
+
+[root@master ingress-app-example]# vim http-deploy-svc.yaml
+
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  name: http-svc
+  namespace: test
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: http-svc
+  template:
+    metadata:
+      labels:
+        app: http-svc
+    spec:
+      containers:
+      - name: http-svc
+        image: gcr.io/google_containers/echoserver:1.8
+        ports:
+        - containerPort: 8080
+        env:
+          - name: NODE_NAME
+            valueFrom:
+              fieldRef:
+                fieldPath: spec.nodeName
+          - name: POD_NAME
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.name
+          - name: POD_NAMESPACE
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.namespace
+          - name: POD_IP
+            valueFrom:
+              fieldRef:
+                fieldPath: status.podIP
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: http-svc
+  namespace: test
+  labels:
+    app: http-svc
+spec:
+  ports:
+  - port: 80
+    targetPort: 8080
+    protocol: TCP
+    name: http
+  selector:
+    app: http-svc
+
+
+:wq (save and exit) 
+
+
+
+
+[root@master ingress-app-example]# kubectl create -f http-deploy-svc.yaml
+deployment.extensions "http-svc" created
+service "http-svc" created
+
+
+[root@master ingress-app-example]# kubectl get pods,svc -n test
+NAME                       READY     STATUS    RESTARTS   AGE
+http-svc-794dc89f5-x4mw9   1/1       Running   0          52s
+
+NAME       TYPE        CLUSTER-IP   EXTERNAL-IP   PORT(S)   AGE
+http-svc   ClusterIP   10.172.0.3   <none>        80/TCP    53s
+
+
+3. Use Ingress to expose HTTP services outside the cluster
+
+[root@master ingress-app-example]# vim http-svc.ingress.yaml
+
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  name: http-svc
+  namespace: test
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+spec:
+  rules:
+  - http:
+      paths:
+      - path: /http-svc
+        backend:
+          serviceName: http-svc
+          servicePort: 80
+
+:wq (save and exit) 
+
+
+[root@master ingress-app-example]# kubectl apply -f http-svc.ingress.yaml
+ingress.extensions "http-svc" created
+
+[root@master ingress-app-example]# kubectl get ingress  -n test
+NAME       HOSTS     ADDRESS            	PORTS     AGE
+http-svc   *         192.168.0.13,192....   80        29s
+
+
+
+4. Access from outside the cluster:
+
+	4.1: Now go to the Other Node which is not the part of Kubernetes Cluster
+	4.2: Open Web Browser 
+	4.3: http://192.168.0.13/http-svc
+	
+	4.4: http://192.168.0.14:/http-svc
+	
+
+5. if you want  to expose the http-svc service in the form of a domain name (nginx virtual host):
+
+[root@master ingress-app-example]# vim http-svc-virtual-host-ingress.yaml
+
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  name: http-svc
+  namespace: test
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+spec:
+  rules:
+  - host: welcome.app2-example.com
+    http:
+      paths:
+      - path: /
+        backend:
+          serviceName: http-svc
+          servicePort: 80
+
+:wq (save and exit) 
+
+[root@master ingress-app-example]# kubectl apply -f http-svc-virtual-host-ingress.yaml
+ingress.extensions "http-svc" configured
+
+
+[root@master ingress]# kubectl get ingress  -n test
+NAME       HOSTS                      ADDRESS        		PORTS     AGE
+http-svc   welcome.app2-example.com   192.168.0.13,192....   80        10m
+
+
+6. As we do not have DNS configured to resolve "http-svc.frognew.com" URL, We can use hosts file to resolve it 
+
+[root@other-host ~]# vim /etc/hosts
+
+192.168.0.13 	welcome.app2-example.com
+192.168.0.14	welcome.app2-example.com
+
+
+7. 	Open Web Browser and point to below URLs: 
+	
+	http://welcome.app2-example.com/http-svc
+	
+
+	
+Congratulations, You have successfully configured Ingress Rule for the Application. 
+
+
+
+#################################################################################
+#																				#
+#			https://blog.frognew.com/2018/06/kubernetes-ingress-1.html			#
+#																				#
+#################################################################################
+
+
+
+		
+		
+		
+		
+		
+		
+		
+			Install and HAProxy on another node to act as LB and forward traffic to 192.168.0.13 and 192.168.0.14 Ingress Controllers 
+			##########################################################################################################################
+			
+1. Install the following Packages 
+
+[root@lb ~]# yum install haproxy openssl-devel -y
+
+
+2. Configure rsyslog to capture haproxy logs
+
+[root@lb ~]# vim /etc/rsyslog.conf
+
+##Add the below two lines in rules section 
+
+### HAProxy Log
+local2.*        /var/log/haproxy.log
+
+
+:wq (save and exit) 
+
+
+[root@lb ~]# systemctl restart rsyslog
+
+
+3. Configure HAProxy 
+
+Make a backup file 
+
+[root@lb ~]# mv /etc/haproxy/haproxy.cfg /etc/haproxy/haproxy.cfg.bak
+
+
+Add the below lines into the files 
+
+[root@lb ~]# vim /etc/haproxy/haproxy.cfg
+
+global
+    chroot      /var/lib/haproxy
+    pidfile     /var/run/haproxy.pid
+    maxconn     4000
+    user        haproxy
+    group       haproxy
+    daemon
+    stats socket /var/lib/haproxy/stats
+
+defaults
+    mode http
+    log global
+    option                  redispatch
+    retries                 3
+    timeout http-request    10s
+    timeout queue           1m
+    timeout connect         10s
+    timeout client          1m
+    timeout server          1m
+    timeout http-keep-alive 10s
+    timeout check           10s
+    maxconn                 3000
+
+frontend http_front
+    mode tcp
+    bind *:80
+    default_backend http_back
+
+frontend https_front
+    mode tcp
+    bind *:443
+    default_backend https_back
+
+backend http_back
+    mode tcp
+    server node3 192.168.0.13:80 send-proxy
+	server node4 192.168.0.14:80 send-proxy
+	
+	backend https_back
+    mode tcp
+    server node3 192.168.0.13:443 send-proxy
+	server node4 192.168.0.14:443 send-proxy
+
+
+:wq (save and exit) 
+
+
+
+4. Start and Enable haproxy service 
+
+[root@lb ~]# systemctl start haproxy
+[root@lb ~]# systemctl enable haproxy
+[root@lb ~]# systemctl status haproxy
+
+
+
+5. Now Open Web Browser and point to the below URLs but before that, we need to configure hosts file to resolve hostname 
+as we don't have DNS Configured yet. 
+
+if you are using Windows Machine to access the URL, remove the below line
+
+Open c:\Windows\System32\drivers\etc\hosts in notepad as Admin 
+
+192.168.0.13	welcome.mynginx-svc.com
+192.168.0.14	welcome.mynginx-svc.com
+192.168.0.13 	welcome.app2-example.com
+192.168.0.14	welcome.app2-example.com
+
+Add the below new lines which is pointing to our new HAProxy Server address 
+
+192.168.0.15	welcome.mynginx-svc.com
+192.168.0.15	welcome.app2-example.com
+
+
+if you are using Linux | UNIX Machine to access the URL, add the below line
+
+Open /etc/hosts in vi|vim and remove the below lines  
+
+192.168.0.13	welcome.mynginx-svc.com
+192.168.0.14	welcome.mynginx-svc.com
+192.168.0.13 	welcome.app2-example.com
+192.168.0.14	welcome.app2-example.com
+
+Add the below new lines which is pointing to our new HAProxy Server address 
+
+192.168.0.15	welcome.mynginx-svc.com
+192.168.0.15	welcome.app2-example.com
+
+
+Now Open Web Browser and point to the below URLs: 
+
+http://welcome.mynginx-svc.com 
+http://welcome.app2-example.com/http-svc
+ 
+
+
+
+ 
+ 
+
+												Another Example of Ingress Rules 
+												#################################
+											
+1. It is a simple app called cafe. It has two paths: /coffee and /tea which simple prints info about the server they are running on.
+
+[root@master ~]# mkdir ingress-example-2
+[root@master ~]# cd ingress-example-2
+
+[root@master ingress-example-2]# vim coffee.yaml
+
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  name: coffee-rc
+spec:
+  replicas: 2
+  template:
+    metadata:
+      labels:
+        app: coffee
+    spec:
+      containers:
+      - name: coffee
+        image: nginxdemos/hello
+        ports:
+        - containerPort: 80
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: coffee-svc
+  labels:
+    app: coffee
+spec:
+  ports:
+  - port: 80
+    targetPort: 80
+    protocol: TCP
+    name: http
+  selector:
+    app: coffee
+
+:wq (save and exit )
+
+
+
+[root@master ingress-example-2]# vim tea.yaml
+
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  name: tea-rc
+spec:
+  replicas: 3
+  template:
+    metadata:
+      labels:
+        app: tea
+    spec:
+      containers:
+      - name: tea
+        image: nginxdemos/hello
+        ports:
+        - containerPort: 80
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tea-svc
+  labels:
+    app: tea
+spec:
+  ports:
+  - port: 80
+    targetPort: 80
+    protocol: TCP
+    name: http
+  selector:
+    app: tea
+	
+:wq (save and exit)
+
+
+[root@master ingress-example-2]# kubectl create -f coffee.yaml
+deployment.extensions "coffee-rc" created
+service "coffee-svc" created
+
+
+
+[root@master ingress-example-2]# kubectl create -f tea.yaml
+deployment.extensions "tea-rc" created
+service "tea-svc" created
+
+
+
+[root@master ingress-example-2]# kubectl get pods
+NAME                         READY     STATUS    RESTARTS   AGE
+coffee-rc-84fdd4ddd5-g2w4c   1/1       Running   0          2m
+coffee-rc-84fdd4ddd5-jgx7g   1/1       Running   0          2m
+dnstool                      1/1       Running   3          3h
+nginxi-1.7.9-7g6kb           1/1       Running   0          4h
+nginxi-1.7.9-9lcbn           1/1       Running   0          4h
+tea-rc-756d89dffc-6mxdb      1/1       Running   0          2m
+tea-rc-756d89dffc-hkdx4      1/1       Running   0          2m
+tea-rc-756d89dffc-p6p7s      1/1       Running   0          2m
+[root@master ingress-example-2]#
+
+
+
+2. now we can create our Ingress object which specifies the path rules:
+ 
+[root@master ingress-example-2]# vim coffee-tea-ingress.yaml
+
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  name: cafe-ingress-nginx
+  annotations:
+    kubernetes.io/ingress.class: "nginx"
+spec:
+  rules:
+  - host: cafe.example.com
+    http:
+      paths:
+      - path: /tea
+        backend:
+          serviceName: tea-svc
+          servicePort: 80
+      - path: /coffee
+        backend:
+          serviceName: coffee-svc
+          servicePort: 80 
+ 
+:wq (save and exit) 
+
+
+[root@master ingress-example-2]# kubectl apply -f coffee-tea-ingress.yaml
+ingress.extensions "cafe-ingress-nginx" created
+
+
+[root@master ingress-example-2]# kubectl get ingress
+NAME                 HOSTS                     ADDRESS            PORTS     AGE
+cafe-ingress-nginx   cafe.example.com          192.168.0.13,...   80        31s
+nginx                welcome.mynginx-svc.com   192.168.0.13,...   80        3h
+
+
+
+3. Now Open Web Browser and point to the below URLs but before that, we need to configure hosts file to resolve hostname 
+as we don't have DNS Configured yet. 
+
+if you are using Windows Machine to access the URL, remove the below line
+
+
+Add the below new line which is pointing to our new HAProxy Server address 
+
+192.168.0.15	welcome.mynginx-svc.com
+192.168.0.15	welcome.app2-example.com
+192.168.0.15	cafe.example.com
+
+if you are using Linux | UNIX Machine to access the URL, add the below line
+
+
+Add the below new lines which is pointing to our new HAProxy Server address 
+
+192.168.0.15	welcome.mynginx-svc.com
+192.168.0.15	welcome.app2-example.com
+192.168.0.15	cafe.example.com
+
+Now Open Web Browser and point to the below URLs: 
+
+http://cafe.example.com/coffee
+
+http://cafe.example.com/tea
+
+
+
+
+
+									Configure TLS Ingress for previously deployed Nginx
+									###################################################
+									
+1. Verify Nginx Pods, RC, and it's Service 
+
+List the Nginx Pods 
+
+[root@master ~]# kubectl get pods | grep nginx
+nginxi-1.7.9-7g6kb           1/1       Running   1          2d
+nginxi-1.7.9-9lcbn           1/1       Running   1          2d
+
+
+List the Nginx RC 
+
+[root@master ~]# kubectl get rc | grep nginx
+nginxi-1.7.9   2         2         2         2d
+
+
+List the Nginx Service 
+
+[root@master ~]# kubectl get svc | grep nginx
+nginx-service   ClusterIP   10.172.134.196   <none>        80/TCP    2d
+
+
+2. As we have created Ingress rule for "nginx-service" with URL "welcome.mynginx-svc.com". Lets verify it. 
+
+Open Web Browser and point to the below URLs but before that, we need to make sure that the hosts file is configured to resolve hostname 
+as we don't have DNS Configured yet. 
+
+Add the below new line which is pointing to our new HAProxy Server address 
+
+192.168.0.15	welcome.mynginx-svc.com
+192.168.0.15	welcome.app2-example.com
+192.168.0.15	cafe.example.com
+
+if you are using Linux | UNIX Machine to access the URL, add the below line
+
+Add the below new lines which is pointing to our new HAProxy Server address 
+
+192.168.0.15	welcome.mynginx-svc.com
+192.168.0.15	welcome.app2-example.com
+192.168.0.15	cafe.example.com
+
+Now Open Web Browser and point to the below URLs: 
+
+http://welcome.mynginx-svc.com
+
+
+3. Create a Key and Certificate. 
+Please note that, In this Example, I am creating a self signed certificate for this demo purpose and not recommanded for production purpose. 
+
+[root@master ~]# openssl req -x509 -newkey rsa:4096 -sha256 -nodes -keyout tls.key -out tls.crt -subj "/CN=welcome.mynginx-svc.com" -days 365
+Generating a 4096 bit RSA private key
+..++
+......................................++
+writing new private key to 'tls.key'
+-----
+[root@master ~]#
+
+
+4. Let's verify the key and certificate files. 
+
+[root@master ~]# ls -l tls.*
+-rw-r--r--. 1 root root 1826 Dec 30 22:32 tls.crt
+-rw-r--r--. 1 root root 3268 Dec 30 22:32 tls.key
+
+
+[root@master ~]# openssl x509 -in tls.crt -text -noout
+
+
+5. Now create the Secrets to store the key and certificate files
+
+[root@master ~]# kubectl create secret tls welcome-mynginx-svc-com-tls --cert=tls.crt --key=tls.key
+secret "welcome-mynginx-svc-com-tls" created
+
+
+[root@master ~]# kubectl get secret
+NAME                          TYPE                                  DATA      AGE
+default-token-qzsct           kubernetes.io/service-account-token   3         2d
+welcome-mynginx-svc-com-tls   kubernetes.io/tls                     2         37s
+
+
+[root@master ~]# kubectl get secret welcome-mynginx-svc-com-tls  -o yaml
+
+
+6. Now we need to modify the previously deployed Ingress rule for nginx-service 
+
+[root@master ingress]# vim nginx-service-ingress.yaml
+
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  name: nginx
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+spec:
+  tls:
+  - secretName: welcome-mynginx-svc-com-tls
+    hosts:
+    - welcome.mynginx-svc.com
+  rules:
+  - host: welcome.mynginx-svc.com
+    http:
+      paths:
+      - path: /
+        backend:
+          serviceName: nginx-service
+          servicePort: 80
+
+:wq (save and exit) 
+
+Please note that, we have added only the below lines in previously created Ingress Rule file 
+
+  tls:
+  - secretName: welcome-mynginx-svc-com-tls
+    hosts:
+    - welcome.mynginx-svc.com
+
+
+7. Now apply the Ingress changes 
+
+[root@master ingress]# kubectl apply -f nginx-service-ingress.yaml
+ingress.extensions "nginx" configured
+
+
+8. Now Open the Web Browser and point to the below URL: 
+
+https://welcome.mynginx-svc.com/
+
+
+
+Congratulations, You have successfully accessed the URL with Certificate. 
+
+
+
+
+
+
+									Deploy WordPress and MySQL on Kubernetes Cluster 
+									#################################################
+							
+
+In this manual we will go through several steps:
+
+1. Create PersistentVolumeClaims and PersistentVolumes
+2. Create a Secret for MySQL
+3. Deploy MySQL
+4. Deploy WordPress
+
+
+We will use NFS server to store WordPress and MySQL data. Let’s prepare it first.
+
+[root@nfs ~]# yum install nfs-utils -y
+
+Now we will share the NFS directory over the private subnet of Kubernetes:
+
+[root@nfs ~]# mkdir -p /kubernetes/wordpress_data
+[root@nfs ~]# mkdir -p /kubernetes/wordpress_data/mysql
+[root@nfs ~]# mkdir -p /kubernetes/wordpress_data/html
+[root@nfs ~]# chmod -R o+rwx /kubernetes/wordpress_data/
+[root@nfs ~]# chmod o+rwx /kubernetes/wordpress_data/
+[root@nfs ~]# ls -ld /kubernetes/wordpress_data/
+drwxr-xrwx. 2 root root 6 Dec 31 22:47 /kubernetes/wordpress_data/
+
+[root@nfs ~]# ls -l /kubernetes/wordpress_data/
+total 0
+drwxr-xrwx. 2 root root 6 Dec 31 22:52 html
+drwxr-xrwx. 2 root root 6 Dec 31 22:52 mysql
+
+
+[root@nfs ~]# echo "/kubernetes/wordpress_data/	 *(rw,sync,no_root_squash)" >> /etc/exports
+
+[root@nfs ~]# cat /etc/exports
+/kubernetes/wordpress_data *(rw,sync,no_root_squash)
+
+[root@nfs ~]# systemctl start nfs-server
+[root@nfs ~]# systemctl enable nfs-server
+
+
+[root@nfs ~]# showmount -e
+Export list for nfs.example.com:
+/kubernetes/wordpress_data *
+
+
+
+Create a Secret for MySQL Password
+
+[root@master ~]# echo -n 'password' | base64
+cGFzc3dvcmQ=
+
+[root@master ~]# mkdir wordpress-mysql
+[root@master ~]# cd wordpress-mysql
+
+[root@master wordpress-mysql]# vim wordpress-namespace.yml
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: wordpress
+
+:wq (save and exit) 
+
+
+[root@master wordpress-mysql]# kubectl apply -f wordpress-namespace.yml
+namespace "wordpress" created
+
+[root@master wordpress-mysql]# kubectl get namespace | grep wordpress
+wordpress       Active    35s
+
+
+[root@master wordpress-mysql]# vim wordpress-secret.yml
+
+
+apiVersion: v1
+kind: Secret
+metadata:
+  name: mysql-pass
+  namespace: wordpress
+type: Opaque
+data:
+  user: YWRtaW4=
+  password: cGFzc3dvcmQ=
+
+
+:wq (save and exit) 
+
+
+[root@master wordpress-mysql]# kubectl apply -f wordpress-secret.yml
+secret "mysql-pass" created
+
+
+[root@master wordpress-mysql]# kubectl get secret -n wordpress
+NAME                  TYPE                                  DATA      AGE
+default-token-8g4tq   kubernetes.io/service-account-token   3         1m
+mysql-pass       	  Opaque                                2         14s
+
+
+
+
+Create PV files and change the IP address of the NFS server you are using.
+
+[root@master wordpress-mysql]# vim wordpress-pv.yml
+
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: wordpress-persistent-storage
+  labels:
+    app: wordpress
+    tier: frontend
+spec:
+  capacity:
+    storage: 10Gi
+  accessModes:
+    - ReadWriteMany
+  nfs:
+    server: 192.168.0.15
+    path: /kubernetes/wordpress_data/html
+
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: mysql-persistent-storage
+  labels:
+    app: wordpress
+    tier: mysql
+spec:
+  capacity:
+    storage: 10Gi
+  accessModes:
+    - ReadWriteMany
+  nfs:
+    server: 192.168.0.15
+    path: /kubernetes/wordpress_data/mysql
+
+:wq (save and exit) 
+
+[root@master wordpress-mysql]# kubectl create -f wordpress-pv.yml
+persistentvolume "wordpress-persistent-storage" created
+persistentvolume "mysql-persistent-storage" created
+
+
+[root@master wordpress-mysql]# kubectl get pv
+NAME                           CAPACITY   ACCESS MODES   RECLAIM POLICY   STATUS      CLAIM     STORAGECLASS   REASON    AGE
+mysql-persistent-storage       10Gi       RWX            Retain           Available                                      34s
+wordpress-persistent-storage   10Gi       RWX            Retain           Available                                      34s
+
+
+
+Create a PVC for wordpress
+
+[root@master wordpress-mysql]# vim wordpress-pvc.yml
+
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: wordpress-persistent-storage
+  namespace: wordpress
+  labels:
+    app: wordpress
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 6Gi
+	  
+:wq (save and exit) 
+
+
+[root@master wordpress-mysql]# kubectl apply -f wordpress-pvc.yml
+persistentvolumeclaim "wordpress-persistent-storage" created
+
+
+[root@master wordpress-mysql]# kubectl get pvc -n wordpress
+NAME                           STATUS    VOLUME                         CAPACITY   ACCESS MODES   STORAGECLASS   AGE
+wordpress-persistent-storage   Bound     wordpress-persistent-storage   10Gi       RWX                           1m
+
+
+Create a PVC for MySQL
+
+[root@master wordpress-mysql]# vim mysql-pvc.yml
+
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mysql-persistent-storage
+  namespace: wordpress
+  labels:
+    app: wordpress
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 6Gi
+
+:wq (save and exit) 
+
+[root@master wordpress-mysql]# kubectl apply -f mysql-pvc.yml
+persistentvolumeclaim "mysql-persistent-storage" created
+
+
+[root@master wordpress-mysql]# kubectl get pvc -n wordpress
+NAME                           STATUS    VOLUME                         CAPACITY   ACCESS MODES   STORAGECLASS   AGE
+mysql-persistent-storage       Bound     mysql-persistent-storage       10Gi       RWX                           18s
+wordpress-persistent-storage   Bound     wordpress-persistent-storage   10Gi       RWX                           4m
+
+
+
+
+Deploy MySQL
+
+[root@master wordpress-mysql]# vim mysql-deploy-svc.yml
+
+---
+apiVersion: extensions/v1beta1 
+kind: Deployment
+metadata:
+  name: wordpress-mysql
+  namespace: wordpress
+  labels:
+    app: wordpress
+spec:
+  selector:
+    matchLabels:
+      app: wordpress
+      tier: mysql
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: wordpress
+        tier: mysql
+    spec:
+      containers:
+      - image: mysql:5.6
+        name: mysql
+        env:
+        - name: MYSQL_ROOT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: mysql-pass        
+              key: password
+        ports:
+        - containerPort: 3306
+          name: mysql
+        volumeMounts:
+        - name: mysql-persistent-storage  
+          mountPath: "/var/lib/mysql"
+      volumes:
+      - name: mysql-persistent-storage    
+        persistentVolumeClaim:
+          claimName: mysql-persistent-storage
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: wordpress-mysql
+  namespace: wordpress
+  labels:
+    app: wordpress
+spec:
+  ports:
+    - port: 3306
+  selector:
+    app: wordpress
+    tier: mysql
+
+		  
+:wq (save and exit) 
+
+
+[root@master wordpress-mysql]# kubectl apply -f mysql-deploy-svc.yml
+deployment.extensions "wordpress-mysql" created
+service "wordpress-mysql" created
+
+
+[root@master wordpress-mysql]# kubectl get pod -n wordpress
+NAME                               READY     STATUS    RESTARTS   AGE
+wordpress-mysql-79f4ff5847-7r74j   1/1       Running   0          9s
+
+
+[root@master wordpress-mysql]# kubectl get svc -n wordpress
+NAME              TYPE        CLUSTER-IP       EXTERNAL-IP   PORT(S)    AGE
+wordpress-mysql   ClusterIP   10.172.224.252   <none>        3306/TCP   2m
+
+
+
+Deploy WordPress
+
+[root@master wordpress-mysql]# vim wordpress-deploy-svc.yml
+
+apiVersion: extensions/v1beta1 
+kind: Deployment
+metadata:
+  name: wordpress
+  namespace: wordpress
+  labels:
+    app: wordpress
+spec:
+  selector:
+    matchLabels:
+      app: wordpress
+      tier: frontend
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: wordpress
+        tier: frontend
+    spec:
+      containers:
+      - image: wordpress:4.8-apache
+        name: wordpress
+        env:
+        - name: WORDPRESS_DB_HOST
+          value: wordpress-mysql
+        - name: WORDPRESS_DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: mysql-pass          
+              key: password
+        ports:
+        - containerPort: 80
+          name: wordpress
+        volumeMounts:
+        - name: wordpress-persistent-storage
+          mountPath: "/var/www/html"          
+      volumes:
+      - name: wordpress-persistent-storage
+        persistentVolumeClaim:
+          claimName: wordpress-persistent-storage
+  
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: wordpress
+  namespace: wordpress
+  labels:
+    app: wordpress
+spec:
+  ports:
+    - port: 80
+  selector:
+    app: wordpress
+    tier: frontend
+  
+
+:wq (save and exit) 
+
+
+
+[root@master wordpress-mysql]# kubectl apply -f wordpress-deploy-svc.yml
+deployment.extensions "wordpress" created
+service "wordpress" created
+
+
+[root@master wordpress-mysql]# kubectl get pods -n wordpress
+NAME                               READY     STATUS    RESTARTS   AGE
+wordpress-6847fdb6b9-84smd         1/1       Running   0          2m
+wordpress-mysql-79f4ff5847-7r74j   1/1       Running   0          16m
+
+
+[root@master wordpress-mysql]# kubectl get svc -n wordpress
+NAME              TYPE        CLUSTER-IP       EXTERNAL-IP   PORT(S)    AGE
+wordpress         ClusterIP   10.172.30.109    <none>        80/TCP     3m
+wordpress-mysql   ClusterIP   10.172.224.252   <none>        3306/TCP   16m
+
+
+
+Expose Wordpress with Ingress rules 
+
+[root@master wordpress-mysql]# vim wordpress-ingress.yml
+
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  name: wordpress
+  namespace: wordpress
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+spec:
+  rules:
+  - host: welcome.wordpress.com
+    http:
+      paths:
+      - path: /
+        backend:
+          serviceName: wordpress
+          servicePort: 80
+
+:wq (save and exit) 
+
+
+[root@master wordpress-mysql]# kubectl apply -f wordpress-ingress.yml
+ingress.extensions "nginx" created
+
+
+[root@master wordpress-mysql]# kubectl get ingress -n wordpress
+NAME     	  HOSTS                   ADDRESS            PORTS     AGE
+wordpress     welcome.wordpress.com   192.168.0.13,...   80        18s
+
+
+
+
+Now Open Web Browser and point to the below URLs but before that, we need to configure hosts file to resolve hostname 
+as we don't have DNS Configured yet. 
+
+Add the below new line which is pointing to our new HAProxy Server address 
+
+192.168.0.15	welcome.wordpress.com
+
+
+if you are using Linux | UNIX Machine to access the URL, add the below line
+
+
+Add the below new lines which is pointing to our new HAProxy Server address 
+
+192.168.0.15	welcome.wordpress.com
+
+
+Now Open Web Browser and point to the below URLs: 
+
+http://welcome.wordpress.com
+
+
+
+Let's secure wordpress site with TLS Certificate 
+
+Create a Key and Certificate. 
+Please note that, In this Example, I am creating a self signed certificate for this demo purpose and not recommanded for production purpose. 
+
+[root@master ~]# openssl req -x509 -newkey rsa:4096 -sha256 -nodes -keyout wordpress-tls.key -out wordpress-tls.crt -subj "/CN=welcome.wordpress.com" -days 365
+
+Generating a 4096 bit RSA private key
+.............................++
+..........++
+writing new private key to 'wordpress-tls.key'
+-----
+
+Let's verify the key and certificate files. 
+
+[root@master wordpress-mysql]# ls -l wordpress-tls.*
+-rw-r--r--. 1 root root 1822 Jan  1 00:18 wordpress-tls.crt
+-rw-r--r--. 1 root root 3272 Jan  1 00:18 wordpress-tls.key
+
+
+[root@master ~]# openssl x509 -in wordpress-tls.crt -text -noout
+
+
+Now create the Secrets to store the key and certificate files
+
+[root@master wordpress-mysql]# kubectl create secret -n wordpress tls welcome-wordpress-com-tls --cert=wordpress-tls.crt --key=wordpress-tls.key
+secret "welcome-wordpress-com-tls" created
+
+
+[root@master wordpress-mysql]# kubectl get secret -n wordpress
+NAME                        TYPE                                  DATA      AGE
+default-token-8g4tq         kubernetes.io/service-account-token   3         1h
+mysql-user-pass             Opaque                                2         1h
+welcome-wordpress-com-tls   kubernetes.io/tls                     2         21s
+
+
+[root@master ~]# kubectl get secret -n wordpress welcome-wordpress-com-tls  -o yaml
+
+
+Now we need to modify the previously deployed Ingress rule for nginx-service 
+
+[root@master wordpress-mysql]# vim wordpress-ingress.yml
+
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  name: wordpress
+  namespace: wordpress
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+spec:
+  tls:
+  - secretName: welcome-wordpress-com-tls
+    hosts:
+    - welcome.wordpress.com
+  rules:
+  - host: welcome.wordpress.com
+    http:
+      paths:
+      - path: /
+        backend:
+          serviceName: wordpress
+          servicePort: 80
+
+
+:wq (save and exit) 
+
+
+[root@master wordpress-mysql]# kubectl apply -f wordpress-ingress.yml
+ingress.extensions "wordpress" configured
+
+
+Now Open the Web Browser and point to the below URL: 
+
+https://welcome.wordpress.com/
+
+
+
+Congratulations, You have successfully accessed the wordpress Site with Certificate. 
+
+
+
+
+								Deploy tomcat with sample app and Jenkins on Kubernetes Cluster 
+								################################################################
+
+1. Create a Namespace 
+
+[root@master ~]# vim tomcat-namespace.yml 
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: tomcat-dev
+
+  
+  
+:wq (save and exit) 
+
+[root@master ~]# kubectl apply -f tomcat-namespace.yml 
+
+
+2. Create a Deployment spec for Jenkins 
+
+[root@master ~]# vim tomcat8-jenkins-deployment.yaml
+
+---
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  labels:
+    k8s-app: tomcat8-jenkins
+  name: tomcat8-jenkins
+  namespace: tomcat-dev
+spec:
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        k8s-app: tomcat8-jenkins
+      name: tomcat8-jenkins
+    spec:
+      containers:
+        -
+          args:
+          - daemon
+          image: "skcho4docker/tomcat8-jenkins-path:ver1.6.3"
+          name: tomcat8-jenkins-path
+          ports:
+            -
+              containerPort: 8080
+              protocol: TCP
+			  
+
+:wq (save and exit) 
+
+[root@master ~]# kubectl apply -f tomcat8-jenkins-deployment.yaml
+
+
+3. Create a Deployment spec for Sample App
+
+[root@master ~]# vim tomcat8-sample-deployment.yaml
+
+---
+
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  labels:
+    k8s-app: tomcat8-sample
+  name: tomcat8-sample
+  namespace: tomcat-dev
+spec:
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        k8s-app: tomcat8-sample
+      name: tomcat8-sample
+    spec:
+      containers:      
+        -
+          args:
+          - daemon          
+          image: "skcho4docker/tomcat8-sample-path:ver1.0.0"
+          name: tomcat8-sample-path
+          ports:
+            -
+              containerPort: 8080
+              protocol: TCP
+			  
+
+:wq (save and exit) 
+
+[root@master ~]# kubectl apply -f tomcat8-sample-deployment.yaml
+
+
+4. Create a Service spec for Jenkins App
+
+[root@master ~]# vim tomcat8-jenkins-service.yaml
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: tomcat8-jenkins
+  namespace: tomcat-dev
+  labels:
+    k8s-app: tomcat8-jenkins
+spec:
+  ports:
+  - port: 80
+    targetPort: 8080
+    protocol: TCP
+  selector:
+    k8s-app: tomcat8-jenkins
+  type: ClusterIP
+  
+
+:wq (save save exit) 
+
+[root@master ~]# kubectl apply -f  tomcat8-jenkins-service.yaml 
+
+
+5. Create a Service spec for Sample App
+
+[root@master ~]# vim tomcat8-sample-service.yaml
+
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: tomcat8-sample
+  namespace: tomcat-dev
+  labels:
+    k8s-app: tomcat8-sample
+spec:
+  ports:
+  - port: 80
+    targetPort: 8080
+    protocol: TCP
+  selector:
+    k8s-app: tomcat8-sample
+  type: ClusterIP
+  
+:wq (save and exit) 
+
+[root@master ~]# kubectl apply -f tomcat8-sample-service.yaml
+
+
+
+6. Create a Ingress Rule for Sample App and Jenkins 
+
+[root@master ~]# vim tomcat8-ingress.yaml
+
+---
+
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  namespace: tomcat-dev
+  name: tomcat8-host
+  annotations:
+    kubernetes.io/ingress.class: "nginx"
+spec:
+  rules:  
+  - host: mytomcat.example.com
+    http:
+      paths:
+      - path: /jenkins
+        backend:
+          serviceName: tomcat8-jenkins
+          servicePort: 80
+      - path: /sample
+        backend:
+          serviceName: tomcat8-sample
+          servicePort: 80
+
+:wq (save and exit )
+
+[root@master ~]# kubectl apply -f tomcat8-ingress.yaml
+
+
+
+7. Now Open Web Browser and point to the below URLs but before that, we need to configure hosts file to resolve hostname 
+as we don't have DNS Configured yet. 
+
+Add the below new line which is pointing to our new HAProxy Server address 
+
+192.168.0.15	mytomcat.example.com
+
+
+if you are using Linux | UNIX Machine to access the URL, add the below line
+
+
+Add the below new lines which is pointing to our new HAProxy Server address 
+
+192.168.0.15	mytomcat.example.com
+
+
+Now Open Web Browser and point to the below URLs: 
+
+http://mytomcat.example.com/sample
+http://mytomcat.example.com/jenkins
+
+
+
+
+										Let's Deploy our Custom tomcat apps on Kubernetes Cluster 
+										##########################################################
+
+1. First we will setup Docker Private Registry Server on different Node 
+
+
+Install docker registry package (docker-distribution)
+
+[root@lb ~]# yum -y install docker docker-distribution
+
+
+Configure Docker registry
+
+[root@lb ~]# vim  /etc/docker-distribution/registry/config.yml
+
+version: 0.1
+log:
+  fields:
+    service: registry
+storage:
+    cache:
+        layerinfo: inmemory
+    filesystem:
+        rootdirectory: /var/lib/registry
+http:
+    addr: :5000
+
+:wq (save and exit) 
+
+
+Change SELinux to permissive Mode 
+
+[root@lb ~]# vim /etc/sysconfig/selinux
+
+SELINUX=permissive
+
+
+:wq (save and exit) 
+
+[root@lb ~]# setenforce 0
+
+
+If firewalld is enabled and running, allow the port on the firewall.
+
+[root@lb ~]# firewall-cmd --add-port=5000/tcp --permanent
+[root@lb ~]# firewall-cmd --reload
+
+
+ 
+Start docker registry service
+
+[root@lb ~]# systemctl start docker-distribution
+[root@lb ~]# systemctl enable docker-distribution
+[root@lb ~]# systemctl status docker-distribution
+
+
+Confirm that you can access port 5000
+
+[root@lb ~]# netstat -tunlp | grep 5000
+tcp6       0      0 :::5000                 :::*                    LISTEN      14114/registry
+
+
+
+Add Insecure Registry to Docker Engine
+
+[root@lb ~]# vim /etc/docker/daemon.json
+
+{
+ "insecure-registries" : ["lb.example.com:5000"]
+ }
+
+:wq (save and exit) 
+
+
+Then restart Docker engine
+
+[root@lb ~]# systemctl restart docker
+[root@lb ~]# systemctl enable docker
+[root@lb ~]# systemctl status docker
+
+
+
+NOTE: You need to configure All the nodes for the above insecure private docker registry, do the following on all nodes: 
+
+~]# vim /etc/docker/daemon.json
+
+{
+ "insecure-registries" : ["lb.example.com:5000"]
+ }
+
+:wq (save and exit) 
+
+
+Then restart Docker engine
+
+~]# systemctl restart docker
+~]# systemctl enable docker
+~]# systemctl status docker
+
+
+
+
+2. Now let's go to private docker registry server and create Dockerfile
+
+
+[root@lb ~]# mkdir tomcat_project
+
+[root@lb ~]# cd tomcat_project/
+
+[root@lb tomcat_project]# vim Dockerfile
+
+
+FROM docker.io/tomcat
+
+MAINTAINER "sureshchandra.rhca@gmail.com"
+
+ENV CATALINA_HOME /usr/local/tomcat
+ENV PATH $CATALINA_HOME/bin:$PATH
+
+#Install MySQL Connector for Tomcat
+
+COPY ./jars/mysql-connector-java-5.1.40.jar $CATALINA_HOME/lib/
+
+#Copy Tomcat Config Files
+COPY ./conf/*.xml $CATALINA_HOME/conf/
+
+COPY ./manager-context/manager-context.xml $CATALINA_HOME/webapps/manager/META-INF/
+
+COPY ./host-manager-context/host-manager-context.xml $CATALINA_HOME/webapps/host-manager/META-INF/
+
+#Copy Applications to webapps Directory
+ADD ./apps/*.war  $CATALINA_HOME/webapps/
+COPY ./apps/version  $CATALINA_HOME/webapps/version
+
+RUN useradd application && chown -R application:application $CATALINA_HOME
+
+USER application
+
+:wq (save and exit) 
+
+ 
+Please note that, I have pre-configured some of the config files for tomcat and then copying it to my Docker Image. 
+You can do the changes as per your requiredment. 
+
+If you are following this Lab, you can copy "tomcat_project" directory in the /root/ directory. 
+In "tomcat_project" directory, I have some applications as following:
+
+[root@lb tomcat_project]# ls -l apps/
+total 96
+-rw-r--r--. 1 root root  3055 Jan  1 20:10 clusterjsp.war
+-rw-r--r--. 1 root root  1278 Jan  1 20:10 example.war
+-rw-r--r--. 1 root root 89315 Jan  1 20:10 student.war
+drwxr-xr-x. 4 root root    54 Jan  1 20:10 version
+
+Please note that "student.war" Application required DB connection and Database which is pre-configured in "conf/context.xml" as following: 
+
+[root@lb tomcat_project]# cat conf/context.xml
+
+<Resource name="jdbc/TestDB" auth="Container" type="javax.sql.DataSource"
+               maxTotal="100" maxIdle="30" maxWaitMillis="10000"
+               username="student" password="student@1" driverClassName="com.mysql.jdbc.Driver"
+               url="jdbc:mysql://192.168.0.15:3306/studentapp"/>
+
+</Context>
+
+You can change it as per your lab setup. 
+
+
+Now lets build the Docker Image 
+
+[root@lb tomcat_project]# docker build -t abc_tomcatapp:v1 .
+
+[root@lb tomcat_project]# docker images
+
+REPOSITORY          TAG                 IMAGE ID            CREATED             SIZE
+abc_tomcatapp       v1                  bcbaf6ddf64d        12 seconds ago      481 MB
+docker.io/tomcat    latest              1a51cb5e3006        3 days ago          462 MB
+
+
+Now push the builded Image into Private Docker Registry
+
+[root@lb tomcat_project]# docker tag abc_tomcatapp:v1 lb.example.com:5000/abc_tomcatapp:v1
+
+[root@lb tomcat_project]# docker images
+REPOSITORY                          TAG                 IMAGE ID            CREATED             SIZE
+abc_tomcatapp                       v1                  bcbaf6ddf64d        2 minutes ago       481 MB
+lb.example.com:5000/abc_tomcatapp   v1                  bcbaf6ddf64d        2 minutes ago       481 MB
+docker.io/tomcat                    latest              1a51cb5e3006        3 days ago          462 MB
+
+[root@lb tomcat_project]# docker push lb.example.com:5000/abc_tomcatapp:v1
+
+
+
+3. Now go to Kubernetes Master Server and Create Spec file for Deployment, Service and Ingress rule. 
+
+[root@master ~]# mkdir abc_tomcatapp_dev
+
+[root@master abc_tomcatapp_dev]# vim abc_tomcatapp_dev.yml
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: abc-tomcatapp-dev
+
+
+---
+
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  labels:
+    k8s-app: abc-tomcatapp-dev
+  name: abc-tomcatapp-dev
+  namespace: abc-tomcatapp-dev
+spec:
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        k8s-app: abc-tomcatapp-dev
+      name: abc-tomcatapp-dev
+    spec:
+      containers:
+        -
+          image: "lb.example.com:5000/abc_tomcatapp:v1"
+          name: abc-tomcatapp-dev
+          ports:
+            -
+              containerPort: 8080
+              protocol: TCP
+
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: abc-tomcatapp-dev
+  namespace: abc-tomcatapp-dev
+  labels:
+    k8s-app: abc-tomcatapp-dev
+spec:
+  ports:
+  - port: 80
+    targetPort: 8080
+    protocol: TCP
+  selector:
+    k8s-app: abc-tomcatapp-dev
+  type: ClusterIP
+
+---
+
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  namespace: abc-tomcatapp-dev
+  name: abc-tomcatapp-dev
+  annotations:
+    kubernetes.io/ingress.class: "nginx"
+spec:
+  rules:
+  - host: abc-tomcatapp-dev.example.com
+    http:
+      paths:
+      - path: /
+        backend:
+          serviceName: abc-tomcatapp-dev
+          servicePort: 80
+
+:wq (save and exit) 
+
+
+[root@master abc_tomcatapp_dev]# kubectl apply -f abc_tomcatapp_dev.yml
+
+[root@master abc_tomcatapp_dev]# kubectl get pods -n abc-tomcatapp-dev
+NAME                                 READY     STATUS    RESTARTS   AGE
+abc-tomcatapp-dev-746c79f99f-gvz99   1/1       Running   0          1m
+
+
+[root@master abc_tomcatapp_dev]# kubectl get svc -n abc-tomcatapp-dev
+NAME                TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)   AGE
+abc-tomcatapp-dev   ClusterIP   10.172.249.67   <none>        80/TCP    1m
+
+
+[root@master abc_tomcatapp_dev]# kubectl get ingress -n abc-tomcatapp-dev -o wide
+NAME                HOSTS                           ADDRESS                     PORTS     AGE
+abc-tomcatapp-dev   abc-tomcatapp-dev.example.com   192.168.0.13,192.168.0.14   80        1m
+
+
+
+Please note that the "student" App required the DB Connection and Database on 192.168.0.15 IP Machine as this IP Address is mentioned in conf/context.xml file. 
+
+
+[root@192.168.0.15 ~]# yum install mariadb-server -y
+[root@192.168.0.15 ~]# systemctl start mariadb
+[root@192.168.0.15 ~]# systemctl enable mariadb
+[root@192.168.0.15 ~]# systemctl status mariadb
+
+[root@192.168.0.15 ~]# mysql
+MariaDB [(none)]> create database studentapp;
+
+MariaDB [none]> use studentapp;
+
+MariaDB [studentapp]> CREATE TABLE Students (student_id INT NOT NULL AUTO_INCREMENT, student_name VARCHAR(100) NOT NULL,     student_addr VARCHAR(100) NOT NULL, student_age VARCHAR(3) NOT NULL, student_qual VARCHAR(20) NOT NULL, student_percent VARCHAR(10) NOT NULL, student_year_passed VARCHAR(10) NOT NULL, PRIMARY KEY (student_id) );
+
+
+MariaDB [studentapp]> grant all privileges on studentapp.* to student@'localhost' identified by 'student@1';
+
+MariaDB [studentapp]> grant all privileges on studentapp.* to student@'%' identified by 'student@1';
+
+MariaDB [studentapp]> flush privileges;
+
+MariaDB [studentapp]> show tables ;
++----------------------+
+| Tables_in_studentapp |
++----------------------+
+| Students             |
++----------------------+
+1 row in set (0.00 sec)
+
+
+MariaDB [studentapp]> select * from Students;
+Empty set (0.00 sec)
+
+
+
+
+4. Now Open Web Browser and point to the below URLs but before that, we need to configure hosts file to resolve hostname 
+as we don't have DNS Configured yet. 
+
+Add the below new line which is pointing to our new HAProxy Server address 
+
+192.168.0.15	abc-tomcatapp-dev.example.com
+
+
+if you are using Linux | UNIX Machine to access the URL, add the below line
+
+
+Add the below new lines which is pointing to our new HAProxy Server address 
+
+192.168.0.15	abc-tomcatapp-dev.example.com
+
+
+Now Open Web Browser and point to the below URLs: 
+
+http://abc-tomcatapp-dev.example.com/clusterjsp
+http://abc-tomcatapp-dev.example.com/example
+http://abc-tomcatapp-dev.example.com/version
+http://abc-tomcatapp-dev.example.com/student
+
+
+
+
+
+
+
+
+Let's update version app from 2.0 to 3.0 
+
+
+Go to the Docker Private Registry Server and do the following: 
+
+[root@lb ~]# cd tomcat_project/
+
+[root@lb tomcat_project]# vim apps/version/index.jsp
+
+Find out the below line 
+
+<p>You are running the <b>2.0</b> version of this application.</p>
+
+and replace 2.0 to 3.0 as following 
+
+<p>You are running the <b>3.0</b> version of this application.</p>
+
+
+:wq (save and exit)
+
+
+now build the new docker image and push it to private docker registry server 
+
+[root@lb tomcat_project]# docker build -t abc_tomcatapp:v2 .
+
+[root@lb tomcat_project]# docker tag abc_tomcatapp:v2 lb.example.com:5000/abc_tomcatapp:v2
+
+[root@lb tomcat_project]# docker push lb.example.com:5000/abc_tomcatapp:v2
+
+
+
+Now go to Kubernetes Master node and update the Image name in Deployment Spec file 
+
+[root@master ~]# cd abc_tomcatapp_dev/
+
+[root@master abc_tomcatapp_dev]# vim abc_tomcatapp_dev.yml
+
+
+Update the Image from "lb.example.com:5000/abc_tomcatapp:v1" to "lb.example.com:5000/abc_tomcatapp:v2" as below: 
+
+          image: "lb.example.com:5000/abc_tomcatapp:v2"
+
+:wq (save and exit) 
+
+
+Now apply the changes 
+
+[root@master abc_tomcatapp_dev]# kubectl apply -f abc_tomcatapp_dev.yml
+
+
+
+
+
+
+Open Web Browser and point to the below URL to verify it 
+
+http://abc-tomcatapp-dev.example.com/version/
+
+
+
+
+Congratulations, You have successfully Deployed your Custom Apps in Kubernetes Cluster. 
+
+
+Please note that, It's not recommanded to have multiple application in single Tomcat App Pod. if the Pod goes down, all the applications will be down. 
+So let's setup each application in individual Pod and connect with single Service. 
+
+
+As we have 4 applications, let's create a directory for each app as following: 
+
+[root@lb ~]# cp -rf tomcat_project/ tomcat_project_2
+
+[root@lb ~]# cd tomcat_project_2/
+
+[root@lb tomcat_project_2]# mkdir clusterjsp
+
+[root@lb tomcat_project_2]# mv apps/ conf/ Dockerfile host-manager-context/ jars/ manager-context/ clusterjsp/
+
+[root@lb tomcat_project_2]# mkdir example
+[root@lb tomcat_project_2]# mkdir student
+[root@lb tomcat_project_2]# mkdir version
+
+[root@lb tomcat_project_2]# cp -rf clusterjsp/* example/
+[root@lb tomcat_project_2]# cp -rf clusterjsp/* student/
+[root@lb tomcat_project_2]# cp -rf clusterjsp/* version/
+
+
+[root@lb tomcat_project_2]# cd clusterjsp/
+
+[root@lb clusterjsp]# vim Dockerfile
+
+
+FROM docker.io/tomcat
+
+MAINTAINER "sureshchandra.rhca@gmail.com"
+
+ENV CATALINA_HOME /usr/local/tomcat
+ENV PATH $CATALINA_HOME/bin:$PATH
+
+#Install MySQL Connector for Tomcat
+
+COPY ./jars/mysql-connector-java-5.1.40.jar $CATALINA_HOME/lib/
+
+#Copy Tomcat Config Files
+COPY ./conf/*.xml $CATALINA_HOME/conf/
+
+COPY ./manager-context/manager-context.xml $CATALINA_HOME/webapps/manager/META-INF/
+
+COPY ./host-manager-context/host-manager-context.xml $CATALINA_HOME/webapps/host-manager/META-INF/
+
+#Copy Applications to webapps Directory
+ADD ./apps/clusterjsp.war  $CATALINA_HOME/webapps/
+
+RUN useradd application && chown -R application:application $CATALINA_HOME
+
+USER application
+
+
+:wq (save and exit) 
+
+
+[root@lb clusterjsp]# docker build -t clusterjsp:v1 .
+
+[root@lb clusterjsp]# docker images
+REPOSITORY                          TAG                 IMAGE ID            CREATED             SIZE
+clusterjsp                          v1                  8e8ce8caa2da        10 seconds ago      481 MB
+abc_tomcatapp                       v2                  ffd1f22be84f        30 minutes ago      481 MB
+lb.example.com:5000/abc_tomcatapp   v2                  ffd1f22be84f        30 minutes ago      481 MB
+abc_tomcatapp                       v1                  bcbaf6ddf64d        About an hour ago   481 MB
+lb.example.com:5000/abc_tomcatapp   v1                  bcbaf6ddf64d        About an hour ago   481 MB
+docker.io/tomcat                    latest              1a51cb5e3006        3 days ago          462 MB
+
+[root@lb clusterjsp]# docker tag  clusterjsp:v1 lb.example.com:5000/clusterjsp:v1
+[root@lb example]# docker push lb.example.com:5000/clusterjsp:v1
+
+
+
+[root@lb clusterjsp]# cd ../example/
+
+[root@lb example]# vim Dockerfile
+
+
+FROM docker.io/tomcat
+
+MAINTAINER "sureshchandra.rhca@gmail.com"
+
+ENV CATALINA_HOME /usr/local/tomcat
+ENV PATH $CATALINA_HOME/bin:$PATH
+
+#Install MySQL Connector for Tomcat
+
+COPY ./jars/mysql-connector-java-5.1.40.jar $CATALINA_HOME/lib/
+
+#Copy Tomcat Config Files
+COPY ./conf/*.xml $CATALINA_HOME/conf/
+
+COPY ./manager-context/manager-context.xml $CATALINA_HOME/webapps/manager/META-INF/
+
+COPY ./host-manager-context/host-manager-context.xml $CATALINA_HOME/webapps/host-manager/META-INF/
+
+#Copy Applications to webapps Directory
+ADD ./apps/example.war  $CATALINA_HOME/webapps/
+
+RUN useradd application && chown -R application:application $CATALINA_HOME
+
+USER application
+
+
+
+:wq (save and exit) 
+
+
+[root@lb example]# docker build -t example:v1 .
+
+[root@lb example]# docker tag  example:v1 lb.example.com:5000/example:v1
+[root@lb example]# docker push lb.example.com:5000/example:v1
+
+
+[root@lb example]# cd ../student/
+
+[root@lb student]# vim Dockerfile
+
+FROM docker.io/tomcat
+
+MAINTAINER "sureshchandra.rhca@gmail.com"
+
+ENV CATALINA_HOME /usr/local/tomcat
+ENV PATH $CATALINA_HOME/bin:$PATH
+
+#Install MySQL Connector for Tomcat
+
+COPY ./jars/mysql-connector-java-5.1.40.jar $CATALINA_HOME/lib/
+
+#Copy Tomcat Config Files
+COPY ./conf/*.xml $CATALINA_HOME/conf/
+
+COPY ./manager-context/manager-context.xml $CATALINA_HOME/webapps/manager/META-INF/
+
+COPY ./host-manager-context/host-manager-context.xml $CATALINA_HOME/webapps/host-manager/META-INF/
+
+#Copy Applications to webapps Directory
+ADD ./apps/student.war  $CATALINA_HOME/webapps/
+
+RUN useradd application && chown -R application:application $CATALINA_HOME
+
+USER application
+
+:wq (save and exit) 
+
+
+[root@lb student]# docker build -t student:v1 .
+[root@lb student]# docker tag  student:v1 lb.example.com:5000/student:v1
+[root@lb student]# docker push lb.example.com:5000/student:v1
+
+
+[root@lb student]# cd ../version/
+[root@lb version]# vim Dockerfile
+
+FROM docker.io/tomcat
+
+MAINTAINER "sureshchandra.rhca@gmail.com"
+
+ENV CATALINA_HOME /usr/local/tomcat
+ENV PATH $CATALINA_HOME/bin:$PATH
+
+#Install MySQL Connector for Tomcat
+
+COPY ./jars/mysql-connector-java-5.1.40.jar $CATALINA_HOME/lib/
+
+#Copy Tomcat Config Files
+COPY ./conf/*.xml $CATALINA_HOME/conf/
+
+COPY ./manager-context/manager-context.xml $CATALINA_HOME/webapps/manager/META-INF/
+
+COPY ./host-manager-context/host-manager-context.xml $CATALINA_HOME/webapps/host-manager/META-INF/
+
+#Copy Applications to webapps Directory
+COPY ./apps/version  $CATALINA_HOME/webapps/version
+
+RUN useradd application && chown -R application:application $CATALINA_HOME
+
+USER application
+
+:wq (save and exit) 
+
+
+[root@lb version]# docker build -t version:v1 .
+[root@lb version]# docker tag  version:v1 lb.example.com:5000/version:v1
+[root@lb version]# docker push lb.example.com:5000/version:v1
+
+
+
+Now go to Kubernetes Master Node and create a spec file as following: 
+
+[root@master ~]# cd /root/abc_tomcatapp_dev
+[root@master abc_tomcatapp_dev]# vim abc_tomcatapp_namespace_dev.yml
+
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: abc-tomcatapp-dev
+
+:wq (save and exit) 
+
+[root@master abc_tomcatapp_dev]# kubectl apply -f abc_tomcatapp_namespace_dev.yml
+
+[root@master abc_tomcatapp_dev]# vim abc_tomcatapp_clusterjsp_dev.yml
+
+---
+
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  labels:
+    k8s-app: abc-tomcatapp-clusterjsp-dev
+  name: abc-tomcatapp-clusterjsp-dev
+  namespace: abc-tomcatapp-dev
+spec:
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        k8s-app: abc-tomcatapp-clusterjsp-dev
+      name: abc-tomcatapp-clusterjsp-dev
+    spec:
+      containers:
+        -
+          image: "lb.example.com:5000/clusterjsp:v1"
+          name: abc-tomcatapp-clusterjsp-dev
+          ports:
+            -
+              containerPort: 8080
+              protocol: TCP
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: abc-tomcatapp-clusterjsp-dev
+  namespace: abc-tomcatapp-dev
+  labels:
+    k8s-app: abc-tomcatapp-clusterjsp-dev
+spec:
+  ports:
+  - port: 80
+    targetPort: 8080
+    protocol: TCP
+  selector:
+    k8s-app: abc-tomcatapp-clusterjsp-dev
+  type: ClusterIP
+
+:wq (save and exit)   
+  
+[root@master abc_tomcatapp_dev]# kubectl apply -f abc_tomcatapp_clusterjsp_dev.yml
+  
+[root@master abc_tomcatapp_dev]# vim abc_tomcatapp_example_dev.yml
+ 
+---
+
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  labels:
+    k8s-app: abc-tomcatapp-example-dev
+  name: abc-tomcatapp-example-dev
+  namespace: abc-tomcatapp-dev
+spec:
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        k8s-app: abc-tomcatapp-example-dev
+      name: abc-tomcatapp-example-dev
+    spec:
+      containers:
+        -
+          image: "lb.example.com:5000/example:v1"
+          name: abc-tomcatapp-example-dev
+          ports:
+            -
+              containerPort: 8080
+              protocol: TCP
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: abc-tomcatapp-example-dev
+  namespace: abc-tomcatapp-dev
+  labels:
+    k8s-app: abc-tomcatapp-example-dev
+spec:
+  ports:
+  - port: 80
+    targetPort: 8080
+    protocol: TCP
+  selector:
+    k8s-app: abc-tomcatapp-example-dev
+  type: ClusterIP
+
+
+:wq (save and exit) 
+  
+  
+  
+[root@master abc_tomcatapp_dev]# kubectl apply -f abc_tomcatapp_example_dev.yml
+
+[root@master abc_tomcatapp_dev]# vim abc_tomcatapp_student_dev.yml
+
+---
+
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  labels:
+    k8s-app: abc-tomcatapp-student-dev
+  name: abc-tomcatapp-student-dev
+  namespace: abc-tomcatapp-dev
+spec:
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        k8s-app: abc-tomcatapp-student-dev
+      name: abc-tomcatapp-student-dev
+    spec:
+      containers:
+        -
+          image: "lb.example.com:5000/student:v1"
+          name: abc-tomcatapp-student-dev
+          ports:
+            -
+              containerPort: 8080
+              protocol: TCP
+
+
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: abc-tomcatapp-student-dev
+  namespace: abc-tomcatapp-dev
+  labels:
+    k8s-app: abc-tomcatapp-student-dev
+spec:
+  ports:
+  - port: 80
+    targetPort: 8080
+    protocol: TCP
+  selector:
+    k8s-app: abc-tomcatapp-student-dev
+  type: ClusterIP
+
+
+:wq (save and exit)   
+  
+  
+[root@master abc_tomcatapp_dev]# kubectl -f abc_tomcatapp_student_dev.yml
+
+[root@master abc_tomcatapp_dev]# vim abc_tomcatapp_version_dev.yml
+
+
+---
+
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  labels:
+    k8s-app: abc-tomcatapp-version-dev
+  name: abc-tomcatapp-version-dev
+  namespace: abc-tomcatapp-dev
+spec:
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        k8s-app: abc-tomcatapp-version-dev
+      name: abc-tomcatapp-version-dev
+    spec:
+      containers:
+        -
+          image: "lb.example.com:5000/version:v1"
+          name: abc-tomcatapp-version-dev
+          ports:
+            -
+              containerPort: 8080
+              protocol: TCP
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: abc-tomcatapp-version-dev
+  namespace: abc-tomcatapp-dev
+  labels:
+    k8s-app: abc-tomcatapp-version-dev
+spec:
+  ports:
+  - port: 80
+    targetPort: 8080
+    protocol: TCP
+  selector:
+    k8s-app: abc-tomcatapp-version-dev
+  type: ClusterIP
+
+  
+:wq (save and exit)   
+  
+  
+  
+[root@master abc_tomcatapp_dev]# kubectl apply -f abc_tomcatapp_version_dev.yml
+
+[root@master abc_tomcatapp_dev]# vim abc_tomcatapp_all_ingress-dev.yml
+
+
+---
+
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  namespace: abc-tomcatapp-dev
+  name: abc-tomcatapp-dev
+  annotations:
+    kubernetes.io/ingress.class: "nginx"
+spec:
+  rules:
+  - host: abc-tomcatapp-dev.example.com
+    http:
+      paths:
+      - path: /clusterjsp
+        backend:
+          serviceName: abc-tomcatapp-clusterjsp-dev
+          servicePort: 80
+      - path: /example
+        backend:
+          serviceName: abc-tomcatapp-example-dev
+          servicePort: 80
+      - path: /student
+        backend:
+          serviceName: abc-tomcatapp-student-dev
+          servicePort: 80
+      - path: /version
+        backend:
+          serviceName: abc-tomcatapp-version-dev
+          servicePort: 80
+
+:wq (save and exit) 
+
+
+
+[root@master abc_tomcatapp_dev]# kubectl apply -f abc_tomcatapp_all_dev.yml
+
+
+[root@master abc_tomcatapp_dev]# kubectl get pods -n abc-tomcatapp-dev
+NAME                                            READY     STATUS    RESTARTS   AGE
+abc-tomcatapp-clusterjsp-dev-68bb876748-wtndm   1/1       Running   0          2m
+abc-tomcatapp-example-dev-749b8db484-6nmr9      1/1       Running   0          2m
+abc-tomcatapp-student-dev-c64b59d56-wb6mf       1/1       Running   0          2m
+abc-tomcatapp-version-dev-7b875798c6-x97jz      1/1       Running   0          2m
+
+
+[root@master abc_tomcatapp_dev]# kubectl get svc -n abc-tomcatapp-dev
+NAME                           TYPE        CLUSTER-IP       EXTERNAL-IP   PORT(S)   AGE
+abc-tomcatapp-clusterjsp-dev   ClusterIP   10.172.232.234   <none>        80/TCP    2m
+abc-tomcatapp-example-dev      ClusterIP   10.172.106.3     <none>        80/TCP    2m
+abc-tomcatapp-student-dev      ClusterIP   10.172.244.57    <none>        80/TCP    2m
+abc-tomcatapp-version-dev      ClusterIP   10.172.108.177   <none>        80/TCP    2m
+
+[root@master abc_tomcatapp_dev]# kubectl get deployment -n abc-tomcatapp-dev
+NAME                           DESIRED   CURRENT   UP-TO-DATE   AVAILABLE   AGE
+abc-tomcatapp-clusterjsp-dev   1         1         1            1           3m
+abc-tomcatapp-example-dev      1         1         1            1           3m
+abc-tomcatapp-student-dev      1         1         1            1           3m
+abc-tomcatapp-version-dev      1         1         1            1           3m
+
+[root@master abc_tomcatapp_dev]# kubectl get ingress -n abc-tomcatapp-dev
+NAME                HOSTS                           ADDRESS            PORTS     AGE
+abc-tomcatapp-dev   abc-tomcatapp-dev.example.com   192.168.0.13,...   80        3m
+
+
+
+
+Now Open the Browser and point to the following URLs: 
+
+
+http://abc-tomcatapp-dev.example.com/clusterjsp/
+
+http://abc-tomcatapp-dev.example.com/example/
+
+http://abc-tomcatapp-dev.example.com/student
+
+http://abc-tomcatapp-dev.example.com/version
+
+
+
+Let's Update the Version app from 3.0 to 4.0 
+
+Go to the Private Docker Register Server and do the following: 
+
+[root@lb ~]# cd tomcat_project_2/version/
+
+[root@lb version]# vim apps/version/index.jsp
+
+<p>You are running the <b>4.0</b> version of this application.</p>
+
+:wq (save and exit) 
+
+
+[root@lb version]# docker build -t version:v2 .
+
+[root@lb version]# docker tag  version:v2 lb.example.com:5000/version:v2
+
+[root@lb version]# docker push lb.example.com:5000/version:v2
+
+
+Now go to Kubernetes Master Node and update the Image in Deployment of version application 
+
+[root@master abc_tomcatapp_dev]# vim abc_tomcatapp_version_dev.yml
+
+
+          image: "lb.example.com:5000/version:v2"
+
+:wq (save and exit)
+
+[root@master abc_tomcatapp_dev]# kubectl apply -f abc_tomcatapp_version_dev.yml
+
+
+Now Open the Browser and point to the following URLs: 
+
+
+http://abc-tomcatapp-dev.example.com/version
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+											Deploy Dashboard for Kubernetes Cluster
+											#######################################
+
+
+
+1. Download Kuberenetes Dashboard YAML Spec file from Git Hub 
+
+[root@master ~]# wget https://raw.githubusercontent.com/kubernetes/dashboard/master/aio/deploy/recommended/kubernetes-dashboard.yaml
+
+2. Deploy Kuberenetes Dashboard 
+
+
+[root@master ~]# kubectl apply -f kubernetes-dashboard.yaml
+secret "kubernetes-dashboard-certs" created
+serviceaccount "kubernetes-dashboard" created
+role.rbac.authorization.k8s.io "kubernetes-dashboard-minimal" created
+rolebinding.rbac.authorization.k8s.io "kubernetes-dashboard-minimal" created
+deployment.apps "kubernetes-dashboard" created
+service "kubernetes-dashboard" created
+
+3. Verify the Dashboard Pod in kube-system namespace
+
+[root@master ~]# kubectl get pods -n kube-system
+NAME                                    READY     STATUS    RESTARTS   AGE
+coredns-847f5c8745-qv4vw                1/1       Running   1          1h
+kubernetes-dashboard-669f9bbd46-xjj5m   1/1       Running   0          32s
+
+
+4. Create a Cluster Admin service account
+
+[root@master ~]# kubectl create serviceaccount dashboard -n default
+serviceaccount "dashboard" created
+
+
+5. Add the cluster binding rules to your dashboard account
+
+[root@master ~]# kubectl create clusterrolebinding dashboard-admin -n default  --clusterrole=cluster-admin  --serviceaccount=default:dashboard
+
+6. Get the secret token required for your dashboard login using the below command:
+
+[root@master ~]# kubectl get secret $(kubectl get serviceaccount dashboard -o jsonpath="{.secrets[0].name}") -o jsonpath="{.data.token}" | base64 --decode
+
+eyJhbGciOiJSUzI1NiIsImtpZCI6IiJ9.eyJpc3MiOiJrdWJlcm5ldGVzL3NlcnZpY2VhY2NvdW50Iiwia3ViZXJuZXRlcy5pby9zZXJ2aWNlYWNjb3VudC9uYW1lc3BhY2UiOiJkZWZhdWx0Iiwia3ViZXJuZXRlcy5pby9zZXJ2aWNlYWNjb3VudC9zZWNyZXQubmFtZSI6ImRhc2hib2FyZC10b2tlbi1kNW50NiIsImt1YmVybmV0ZXMuaW8vc2VydmljZWFjY291bnQvc2VydmljZS1hY2NvdW50Lm5hbWUiOiJkYXNoYm9hcmQiLCJrdWJlcm5ldGVzLmlvL3NlcnZpY2VhY2NvdW50L3NlcnZpY2UtYWNjb3VudC51aWQiOiIzNzM2OWYzOC0wODRjLTExZTktYWEwNS0wODAwMjc4MDEzMmIiLCJzdWIiOiJzeXN0ZW06c2VydmljZWFjY291bnQ6ZGVmYXVsdDpkYXNoYm9hcmQifQ.m3SVKKI5aabxmvVn2cr1sSfafe_B2gQS3MFHbPmsrwbyTofF5D7v-71Ik7aY-mqGNYW7DQ7wkY3G_NtzEokHhFYqrVV5Bl0YGZNMe_eBGeziHMBK9NEAesygmHhwTZ9jBXtPsgpg1IArktMyJIi0ZQNJU45UlvaON25lJz6PyODG5UI2XAuMSCyduCTN1x3k1Qgw53XKfaHIMJTXXz0U0g5vxlml2XyfmDU6FQd0chgkdBPA7TEKhvmxUU6LcXPPBceLRUULvJELC6mAmaivLyfYam1PdwLmklvdMXTbwIv4LiBGYWrewqAo7R56EcPuqCbLViQ_W_9wjS7xFZRdWA
+
+
+NOTE: Copy the above token. 
+
+7. Accessing Dashboard using the kubectl 
+
+[root@master ~]# kubectl proxy 
+
+
+Now Open Web Browser and and point to the followoing URL:
+
+http://localhost:8001/api/v1/namespaces/kube-system/services/https:kubernetes-dashboard:/proxy/
+
+Select -: Token Options and Paste the Token in the box and then click on Signin button 
+
+
+Note: if you kill " kubectl proxy" command, Dashboard will no longer available 
