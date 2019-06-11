@@ -1,0 +1,43 @@
+Lab2: Create a pod 
+
+$ kubectl apply -f namespace.yaml
+
+$ vim pod.yaml
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: example-pod
+  namespace: project1
+spec:
+  containers:
+  - name: web
+    image: nginx
+
+:wq (save and exit) 
+
+
+$ kubectl apply -f pod.yaml
+
+$ kubectl get pod -n project1
+
+NAME      READY   STATUS    RESTARTS   AGE
+example   2/2     Running   0          16s
+
+
+$ kubectl get pod -n project1 -o wide
+
+NAME      READY   STATUS    RESTARTS   AGE   IP         NODE                                                NOMINATED NODE
+example   1/1     Running   0          50s   10.8.1.4   gke-standard-cluster-1-default-pool-31d796d7-9z1s   <none>
+
+
+Delete the Pod
+
+$ kubectl delete -f pod.yaml
+
+List the pod
+
+$ kubectl get pod -n project1
+
+
+##############################################

@@ -1,0 +1,40 @@
+Lab3: Create two containers in a pod
+
+$ vim two-containers-pod.yaml
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: 2c-pod
+  namespace: project1
+spec:
+  containers:
+  - name: web
+    image: nginx
+  - name: centos
+    image: centos
+    command: ["/bin/sh", "-c", "while : ;do curl http://localhost:80/;sleep 10; done"]
+
+:wq (save and exit) 
+
+
+$ kubectl apply -f two-containers-pod.yaml
+
+$ kubectl get pod -n project1
+
+NAME     READY   STATUS    RESTARTS   AGE
+2c-pod   2/2     Running   0          46s
+
+We can see, two containers are currently running. Uptime is 46 seconds. 
+
+Use kubectl command to get stdout for the container.
+
+$ kubectl logs 2c-pod -c centos -n project1
+
+$ kubectl describe pod 2c-pod -n project1
+
+$ kubectl delete pod  2c-pod -n project1
+
+$ kubectl get pod -n project1
+
+##############################################

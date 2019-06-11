@@ -1,0 +1,38 @@
+Lab1: Create a namespace: 
+#########################
+
+Create the namespace with command:
+
+$ kubectl create namespace demo-project
+
+Get the list of namespaces 
+
+$ kubectl get namespace
+
+
+Create the namespace with Spec file: 
+
+$ vim namespace.yaml
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: project1
+
+:wq (save and exit) 
+
+
+$ kubectl create -f namespace.yaml
+
+$ kubectl get namespace
+
+
+Delete the namespace: 
+
+$ kubectl delete namespace demo-project
+
+$ kubectl delete -f namespace.yaml
+
+$ kubectl get namespace
+
+##############################################

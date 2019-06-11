@@ -1,0 +1,167 @@
+Lab6: Create Deployments Using Command for nginx 
+
+$ kubectl run nginx --image=nginx:1.12.0 --replicas=2 --port=80 -n project1
+
+$ kubectl get deployment -n project1
+
+NAME    DESIRED   CURRENT   UP-TO-DATE   AVAILABLE   AGE
+nginx   2         2         2            2           37s
+
+
+$ kubectl get pod  -n project1
+
+NAME                   READY   STATUS    RESTARTS   AGE
+nginx-c6747c55-krdx7   1/1     Running   0          73s
+nginx-c6747c55-t68p9   1/1     Running   0          73s
+
+
+If we delete one of the pods, the replaced pod will be scheduled and launched immediately.
+That's because deployments creates a ReplicaSet behind the scenes, which will ensure the
+number of replicas is matched with our desired count.
+
+
+$ kubectl get rs  -n project1
+NAME             DESIRED   CURRENT   READY   AGE
+nginx-c6747c55   2         2         2       2m9s
+
+
+expose port 80 to service port 80
+
+$ kubectl expose deployment nginx --port=80 --target-port=80 -n project1 
+
+
+$ kubectl get services -n project1
+NAME    TYPE        CLUSTER-IP    EXTERNAL-IP   PORT(S)   AGE
+nginx   ClusterIP   10.39.246.9   <none>        80/TCP    38s
+
+
+$ kubectl describe services -n project1
+Name:              nginx
+Namespace:         project1
+Labels:            run=nginx
+Annotations:       <none>
+Selector:          run=nginx
+Type:              ClusterIP
+IP:                10.39.246.9
+Port:              <unset>  80/TCP
+TargetPort:        80/TCP
+Endpoints:         10.36.1.96:80,10.36.2.74:80
+Session Affinity:  None
+Events:            <none>
+
+
+$ kubectl delete deployment nginx   -n project1
+
+$ kubectl delete svc  nginx   -n project1
+
+$ kubectl get all  -n project1
+
+
+Deployments can be created by spec as well. The previous deployments and service
+launched by kubectl can be converted to the following spec:
+
+
+$ vim Deployments.yaml
+
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  name: nginx
+  namespace: project1
+spec:
+  replicas: 2
+  template:
+    metadata:
+      labels:
+        run: nginx
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:1.12.0
+        ports:
+        - containerPort: 80
+---
+
+kind: Service
+apiVersion: v1
+metadata:
+  name: nginx
+  namespace: project1
+  labels:
+    run: nginx
+spec:
+  selector:
+    run: nginx
+  ports:
+  - protocol: TCP
+    port: 80
+    targetPort: 80
+    name: http
+	
+:wq (save and exit) 
+
+$ kubectl create -f Deployments.yaml
+
+
+$ kubectl get all  -n project1 
+NAME                       READY   STATUS    RESTARTS   AGE
+pod/nginx-c6747c55-mxg2c   1/1     Running   0          13s
+pod/nginx-c6747c55-p49tq   1/1     Running   0          13s
+
+NAME            TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)   AGE
+service/nginx   ClusterIP   10.39.249.234   <none>        80/TCP    13s
+
+NAME                    DESIRED   CURRENT   UP-TO-DATE   AVAILABLE   AGE
+deployment.apps/nginx   2         2         2            2           14s
+
+NAME                             DESIRED   CURRENT   READY   AGE
+replicaset.apps/nginx-c6747c55   2         2         2       14s
+
+
+
+Let's scale the replicas to 10
+
+$ kubectl edit deployment.apps/nginx -n project1
+
+$ kubectl get pod -n project1
+
+NAME                   READY   STATUS    RESTARTS   AGE
+nginx-c6747c55-2djxz   1/1     Running   0          9s
+nginx-c6747c55-ck5rf   1/1     Running   0          9s
+nginx-c6747c55-fqppz   1/1     Running   0          9s
+nginx-c6747c55-jgjsl   1/1     Running   0          9s
+nginx-c6747c55-jv98x   1/1     Running   0          62s
+nginx-c6747c55-mxg2c   1/1     Running   0          66m
+nginx-c6747c55-p49tq   1/1     Running   0          66m
+nginx-c6747c55-rdv6f   1/1     Running   0          62s
+nginx-c6747c55-rxr2g   1/1     Running   0          62s
+nginx-c6747c55-sjm95   1/1     Running   0          9s
+
+
+Scale down the replicas to 5 
+
+$ kubectl scale --replicas=5 deployment.apps/nginx -n project1
+
+
+let's update the nginx images from "nginx:1.12.0" to "latest" in deployment
+
+$ kubectl edit deployment.apps/nginx -n project1 
+
+$ kubectl get pod -n project1
+
+
+$ kubectl describe deployments/nginx -n project1
+
+
+let's update the nginx images from "latest" to "nginx:1.12.0" in deployment
+
+$ kubectl set image deployment/nginx nginx=nginx:1.12.0 -n project1
+
+$ kubectl describe deployments/nginx -n project1
+
+$ kubectl delete -f Deployments.yaml
+
+$ kubectl get all  -n project1
+
+
+##############################################

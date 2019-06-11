@@ -1,0 +1,684 @@
+Lab 10: Setting up the Nginx Ingress Controller
+
+
+Step 1: Create a Namespace: 
+
+$ mkdir ingress-controller && cd ingress-controller
+
+$ vim 01-ingress-namespace.yaml
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ingress-nginx
+  
+
+:wq (save and exit) 
+
+
+$ kubectl apply -f 01-ingress-namespace.yaml
+
+$ kubectl get namespace
+
+NAME            STATUS   AGE
+default         Active   29h
+ingress-nginx   Active   21s
+kube-public     Active   29h
+kube-system     Active   29h
+project1        Active   29h
+
+
+Step 2: Create a default backend and that default backend should handle all url paths and hosts that Nginx Controller does not understand
+
+$ vim 02-default-backend.yaml
+
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  name: default-http-backend
+  labels:
+    app: default-http-backend
+  namespace: ingress-nginx
+spec:
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: default-http-backend
+    spec:
+      terminationGracePeriodSeconds: 60
+      containers:
+      - name: default-http-backend
+        # Any image is permissable as long as:
+        # 1. It serves a 404 page at /
+        # 2. It serves 200 on a /healthz endpoint
+        image: gcr.io/google_containers/defaultbackend:1.4
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8080
+            scheme: HTTP
+          initialDelaySeconds: 30
+          timeoutSeconds: 5
+        ports:
+        - containerPort: 8080
+        resources:
+          limits:
+            cpu: 10m
+            memory: 20Mi
+          requests:
+            cpu: 10m
+            memory: 20Mi
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: default-http-backend
+  namespace: ingress-nginx
+  labels:
+    app: default-http-backend
+spec:
+  ports:
+  - port: 80
+    targetPort: 8080
+  selector:
+    app: default-http-backend
+
+
+:wq (save and exit) 
+
+
+$ kubectl apply -f 02-default-backend.yaml
+
+$ kubectl get pod -n ingress-nginx
+
+NAME                                    READY   STATUS    RESTARTS   AGE
+default-http-backend-587b7d64b5-6t9vc   1/1     Running   0          24s
+
+
+$ kubectl get svc -n ingress-nginx
+
+NAME                   TYPE        CLUSTER-IP     EXTERNAL-IP   PORT(S)   AGE
+default-http-backend   ClusterIP   10.11.248.10   <none>        80/TCP    46s
+
+
+
+Step 3: Create RBAC role and clusterrole and bind it with Service Account 
+
+$ vim 03-rbac.yaml 
+
+---
+
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: nginx-ingress-serviceaccount
+  namespace: ingress-nginx
+
+---
+
+apiVersion: rbac.authorization.k8s.io/v1beta1
+kind: ClusterRole
+metadata:
+  name: nginx-ingress-clusterrole
+rules:
+  - apiGroups:
+      - ""
+    resources:
+      - configmaps
+      - endpoints
+      - nodes
+      - pods
+      - secrets
+    verbs:
+      - list
+      - watch
+  - apiGroups:
+      - ""
+    resources:
+      - nodes
+    verbs:
+      - get
+  - apiGroups:
+      - ""
+    resources:
+      - services
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - "extensions"
+    resources:
+      - ingresses
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - ""
+    resources:
+        - events
+    verbs:
+        - create
+        - patch
+  - apiGroups:
+      - "extensions"
+    resources:
+      - ingresses/status
+    verbs:
+      - update
+
+---
+
+apiVersion: rbac.authorization.k8s.io/v1beta1
+kind: Role
+metadata:
+  name: nginx-ingress-role
+  namespace: ingress-nginx
+rules:
+  - apiGroups:
+      - ""
+    resources:
+      - configmaps
+      - pods
+      - secrets
+      - namespaces
+    verbs:
+      - get
+  - apiGroups:
+      - ""
+    resources:
+      - configmaps
+    resourceNames:
+      # Defaults to "<election-id>-<ingress-class>"
+      # Here: "<ingress-controller-leader>-<nginx>"
+      # This has to be adapted if you change either parameter
+      # when launching the nginx-ingress-controller.
+      - "ingress-controller-leader-nginx"
+    verbs:
+      - get
+      - update
+  - apiGroups:
+      - ""
+    resources:
+      - configmaps
+    verbs:
+      - create
+  - apiGroups:
+      - ""
+    resources:
+      - endpoints
+    verbs:
+      - get
+
+---
+
+apiVersion: rbac.authorization.k8s.io/v1beta1
+kind: RoleBinding
+metadata:
+  name: nginx-ingress-role-nisa-binding
+  namespace: ingress-nginx
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: nginx-ingress-role
+subjects:
+  - kind: ServiceAccount
+    name: nginx-ingress-serviceaccount
+    namespace: ingress-nginx
+
+---
+
+apiVersion: rbac.authorization.k8s.io/v1beta1
+kind: ClusterRoleBinding
+metadata:
+  name: nginx-ingress-clusterrole-nisa-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: nginx-ingress-clusterrole
+subjects:
+  - kind: ServiceAccount
+    name: nginx-ingress-serviceaccount
+    namespace: ingress-nginx
+
+:wq (save and exit) 
+
+
+
+Step 4: Now that our default backend is running, we can create the Nginx Ingress Controller
+
+$ vim 04-nginx-ingress-controller.yaml
+
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  name: nginx-ingress-controller
+  namespace: ingress-nginx
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ingress-nginx
+  template:
+    metadata:
+      labels:
+        app: ingress-nginx
+      annotations:
+        prometheus.io/port: '10254'
+        prometheus.io/scrape: 'true'
+    spec:
+	  serviceAccountName: nginx-ingress-serviceaccount
+      containers:
+        - name: nginx-ingress-controller
+          image: quay.io/kubernetes-ingress-controller/nginx-ingress-controller:0.9.0-beta.16
+          args:
+            - /nginx-ingress-controller
+            - --default-backend-service=$(POD_NAMESPACE)/default-http-backend
+			- --publish-service=$(POD_NAMESPACE)/ingress-nginx
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+          ports:
+          - name: http
+            containerPort: 80
+          - name: https
+            containerPort: 443
+          livenessProbe:
+            failureThreshold: 3
+            httpGet:
+              path: /healthz
+              port: 10254
+              scheme: HTTP
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            successThreshold: 1
+            timeoutSeconds: 1
+          readinessProbe:
+            failureThreshold: 3
+            httpGet:
+              path: /healthz
+              port: 10254
+              scheme: HTTP
+            periodSeconds: 10
+            successThreshold: 1
+            timeoutSeconds: 1
+
+			
+:wq (save and exit) 
+
+
+$ kubectl apply -f 04-nginx-ingress-controller.yaml
+
+
+$ kubectl get pod -n ingress-nginx
+
+NAME                                        READY   STATUS    RESTARTS   AGE
+default-http-backend-587b7d64b5-6t9vc       1/1     Running   0          18m
+nginx-ingress-controller-84fcff8694-6jkxc   1/1     Running   0          78s
+
+
+Step 5: Expose this deployment so that it will have External IP through which users will connect to our app.
+
+$ vim 05-nginx-ingress-controller-svc.yaml
+
+kind: Service
+apiVersion: v1
+metadata:
+  name: ingress-nginx
+  namespace: ingress-nginx
+  labels:
+    app: ingress-nginx
+spec:
+  externalTrafficPolicy: Local
+  type: LoadBalancer
+  selector:
+    app: ingress-nginx
+  ports:
+  - name: http
+    port: 80
+    targetPort: http
+  - name: https
+    port: 443
+    targetPort: https
+
+:wq (save and exit) 
+
+
+$ kubectl apply -f 05-nginx-ingress-controller-svc.yaml
+
+$ kubectl get svc -n ingress-nginx
+
+NAME                   TYPE           CLUSTER-IP     EXTERNAL-IP     PORT(S)                      AGE
+default-http-backend   ClusterIP      10.11.248.10   <none>          80/TCP                       26m
+ingress-nginx          LoadBalancer   10.11.244.38   34.66.129.247   80:31164/TCP,443:30427/TCP   4m50s
+
+
+
+Now let's try that out by using curl. Requests to / should return 404 and to /healthz should return 200:
+
+$ curl -v 34.66.129.247/
+
+*   Trying 34.66.129.247...
+* TCP_NODELAY set
+* Connected to 34.66.129.247 (34.66.129.247) port 80 (#0)
+> GET / HTTP/1.1
+> Host: 34.66.129.247
+> User-Agent: curl/7.52.1
+> Accept: */*
+>
+< HTTP/1.1 404 Not Found			#Look here 
+< Server: nginx/1.13.6
+< Date: Tue, 11 Jun 2019 11:56:01 GMT
+< Content-Type: text/plain; charset=utf-8
+< Content-Length: 21
+< Connection: keep-alive
+< Vary: Accept-Encoding
+< Strict-Transport-Security: max-age=15724800; includeSubDomains;
+<
+* Curl_http_done: called premature == 0
+* Connection #0 to host 34.66.129.247 left intact
+
+
+$ curl -v 34.66.129.247/healthz
+
+*   Trying 34.66.129.247...
+* TCP_NODELAY set
+* Connected to 34.66.129.247 (34.66.129.247) port 80 (#0)
+> GET /healthz HTTP/1.1
+> Host: 34.66.129.247
+> User-Agent: curl/7.52.1
+> Accept: */*
+>
+< HTTP/1.1 200 OK					# Look here 
+< Server: nginx/1.13.6
+< Date: Tue, 11 Jun 2019 11:56:30 GMT
+< Content-Type: text/html
+< Content-Length: 0
+< Connection: keep-alive
+< Strict-Transport-Security: max-age=15724800; includeSubDomains;
+<
+* Curl_http_done: called premature == 0
+* Connection #0 to host 34.66.129.247 left intact
+
+
+Step 6: Now that our nginx ingress controller is running, we can deploy our application. It is a simple app called cafe. 
+It has two paths: /coffee and /tea which simple prints info about the server they are running on.
+
+$ vim 06-coffee.yaml
+
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  name: coffee-rc
+spec:
+  replicas: 2
+  template:
+    metadata:
+      labels:
+        app: coffee
+    spec:
+      containers:
+      - name: coffee
+        image: nginxdemos/hello
+        ports:
+        - containerPort: 80
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: coffee-svc
+  labels:
+    app: coffee
+spec:
+  ports:
+  - port: 80
+    targetPort: 80
+    protocol: TCP
+    name: http
+  selector:
+    app: coffee
+	
+
+:wq (save and exit) 
+
+$ kubectl apply -f 06-coffee.yaml
+
+$ kubectl get pod
+NAME                         READY   STATUS    RESTARTS   AGE
+coffee-rc-7dd5b6456b-k4m8w   1/1     Running   0          6s
+coffee-rc-7dd5b6456b-qlcns   1/1     Running   0          6s
+
+
+
+$ vim 06-tea.yaml
+
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  name: tea-rc
+spec:
+  replicas: 3
+  template:
+    metadata:
+      labels:
+        app: tea
+    spec:
+      containers:
+      - name: tea
+        image: nginxdemos/hello
+        ports:
+        - containerPort: 80
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tea-svc
+  labels:
+    app: tea
+spec:
+  ports:
+  - port: 80
+    targetPort: 80
+    protocol: TCP
+    name: http
+  selector:
+    app: tea
+	
+:wq (save and exit) 
+
+
+$ kubectl apply -f 06-tea.yaml
+
+$ kubectl get pod
+NAME                         READY   STATUS    RESTARTS   AGE
+coffee-rc-7dd5b6456b-k4m8w   1/1     Running   0          110s
+coffee-rc-7dd5b6456b-qlcns   1/1     Running   0          110s
+tea-rc-5dd85447cd-fld45      1/1     Running   0          7s
+tea-rc-5dd85447cd-hg7xs      1/1     Running   0          7s
+tea-rc-5dd85447cd-z7lv8      1/1     Running   0          7s
+
+
+$ kubectl get svc
+NAME         TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)   AGE
+coffee-svc   ClusterIP   10.11.251.234   <none>        80/TCP    2m11s
+kubernetes   ClusterIP   10.11.240.1     <none>        443/TCP   30h
+tea-svc      ClusterIP   10.11.244.9     <none>        80/TCP    29s
+
+
+
+Step 7: Create the Ingress rules which specifies the path in URL
+
+
+$ vim 07-coffee-tea-ingress.yaml 
+
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  name: cafe-ingress-nginx
+  annotations:
+    kubernetes.io/ingress.class: "nginx"
+spec:
+  rules:
+  - host: cafe.example.com
+    http:
+      paths:
+      - path: /tea
+        backend:
+          serviceName: tea-svc
+          servicePort: 80
+      - path: /coffee
+        backend:
+          serviceName: coffee-svc
+          servicePort: 80
+		  
+:wq (save and exit) 
+
+
+$ kubectl apply -f 07-coffee-tea-ingress.yaml
+
+
+$ kubectl get ingress
+NAME                 HOSTS              ADDRESS         PORTS   AGE
+cafe-ingress-nginx   cafe.example.com   34.66.129.247   80      14s
+
+#############################################################################################################################		
+#											NOTE 																			#
+#																															#
+#	This resource has an annotation "kubernetes.io/ingress.class: "nginx"". 												#
+#	This is needed because this ingress is only to be picked up by our Nginx Ingress Controller, not the one by GKE.		#
+#																															#
+#############################################################################################################################	
+
+
+
+Step 8: Open Web Browser and point to the below URLs: 
+
+http://cafe.example.com/tea
+http://cafe.example.com/coffee
+
+
+If you dont have DNS to resolve the above URL, you can use "hosts" file to resolve it with ingress controller EXTERNAL-IP 
+
+To get the ingress controller EXTERNAL-IP, use the below command:
+
+$ kubectl get svc -n ingress-nginx
+NAME                   TYPE           CLUSTER-IP     EXTERNAL-IP     PORT(S)                      AGE
+default-http-backend   ClusterIP      10.11.248.10   <none>          80/TCP                       5h31m
+ingress-nginx          LoadBalancer   10.11.244.38   34.66.129.247   80:31164/TCP,443:30427/TCP   5h10m
+
+Now the below line in "hosts" file to resolve the above URLs: 
+
+34.66.129.247   cafe.example.com
+
+
+###############################################################################
+
+
+
+Example 2: Ingress rules for multiple Hosts 
+##########
+
+Step 1: Read the  ConfigMap Spec file 
+
+$ cat Spec-Files/Lab-10/01-nginx-configmap.yaml
+
+
+Step 2: Create ConfigMap 
+
+$ kubectl apply -f Spec-Files/Lab-10/01-nginx-configmap.yaml
+
+$ kubectl get cm -n project1
+NAME                 DATA   AGE
+default-index-html   1      15m
+nginx-conf           1      15m
+v1-index-html        1      15m
+v2-index-html        1      15m
+
+
+Step 3: Read the Spec file of default, v1 and v2 nginx Deployments
+
+$ cat Spec-Files/Lab-10/02-nginx-deployments-n-service-ingress-default.yaml
+
+$ cat Spec-Files/Lab-10/03-nginx-deployments-n-service-ingress-v1.yaml
+
+$ cat Spec-Files/Lab-10/04-nginx-deployments-n-service-ingress-v2.yaml
+
+
+Step 4: Create the default, v1 and v2 nginx Deployments using Spec files 
+
+
+$ kubectl apply -f Spec-Files/Lab-10/02-nginx-deployments-n-service-ingress-default.yaml
+
+$ kubectl apply -f Spec-Files/Lab-10/03-nginx-deployments-n-service-ingress-v1.yaml
+
+$ kubectl apply -f Spec-Files/Lab-10/04-nginx-deployments-n-service-ingress-v2.yaml
+
+
+Step 5: List the Pods 
+
+$ kubectl get pod -n project1 
+NAME                             READY   STATUS    RESTARTS   AGE
+default-nginx-5577cf9878-5hh5h   1/1     Running   0          5m39s
+v1-nginx-675585c948-8dmfg        1/1     Running   0          9m44s
+v2-nginx-687bf575d5-5dwzj        1/1     Running   0          8m
+
+
+Step 6: List the Services 
+
+$ kubectl get svc -n project1
+NAME            TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)   AGE
+default-nginx   ClusterIP   10.11.241.23    <none>        80/TCP    5m38s
+v1-nginx        ClusterIP   10.11.252.104   <none>        80/TCP    2m22s
+v2-nginx        ClusterIP   10.11.240.243   <none>        80/TCP    24s
+
+
+Step 7: Read the Ingress rules which specifies URL 
+
+
+$ cat Spec-Files/Lab-10/05-nginx-default-v1-v2-ingress.yaml
+
+
+Step 8: Apply the ingress rules 
+
+$ kubectl apply -f Spec-Files/Lab-10/05-nginx-default-v1-v2-ingress.yaml
+
+
+Step 9: List the ingress rules 
+
+$ kubectl get ingress -n project1
+NAME                  HOSTS                                               ADDRESS         PORTS   AGE
+nginx-default-v1-v2   default.example.com,v1.example.com,v2.example.com   34.66.129.247   80      13m
+
+
+Step 10: Open Web Browser and point to the below URLs: 
+
+http://default.example.com
+http://v1.example.com
+http://v2.example.com
+
+
+If you dont have DNS to resolve the above URLs, you can use "hosts" file to resolve it with ingress controller EXTERNAL-IP 
+
+To get the ingress controller EXTERNAL-IP, use the below command:
+
+$ kubectl get svc -n ingress-nginx
+NAME                   TYPE           CLUSTER-IP     EXTERNAL-IP     PORT(S)                      AGE
+default-http-backend   ClusterIP      10.11.248.10   <none>          80/TCP                       5h31m
+ingress-nginx          LoadBalancer   10.11.244.38   34.66.129.247   80:31164/TCP,443:30427/TCP   5h10m
+
+Now the below lines in "hosts" file to resolve the above URLs: 
+
+34.66.129.247   default.example.com
+34.66.129.247   v1.example.com
+34.66.129.247   v2.example.com
+
+###############################################################################

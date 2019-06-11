@@ -1,0 +1,399 @@
+Lab 9: ConfigMap example
+
+Example 1: 
+##########
+
+A ConfigMap contains a set of named strings. So let's create that file first: 
+
+$ vim configmap.yaml
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: test-configmap
+  namespace: project1
+data:
+  data-1: value-1
+  data-2: value-2
+  data-3: value-3
+
+:wq (save and exit) 
+
+
+$ kubectl create -f  configmap.yaml
+
+
+You can use kubectl to see information about the ConfigMap:
+
+$ kubectl get configmap -n project1
+NAME             DATA   AGE
+test-configmap   3      21s
+
+
+$ kubectl describe configMap test-configmap -n project1
+Name:         test-configmap
+Namespace:    project1
+Labels:       <none>
+Annotations:  kubectl.kubernetes.io/last-applied-configuration:
+                {"apiVersion":"v1","data":{"data-1":"value-1","data-2":"value-2","data-3":"value-3"},"kind":"ConfigMap","metadata":{"annotations":{},"name...
+
+Data
+====
+data-2:
+----
+value-2
+data-3:
+----
+value-3
+data-1:
+----
+value-1
+Events:  <none>
+
+
+$ kubectl get configmaps test-configmap -o yaml -n project1
+
+
+
+
+Example 2: Create a pod that consumes a configMap in environment variables
+##########
+
+
+
+$ vim env-pod.yaml
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: config-env-test-pod
+  namespace: project1
+spec:
+  containers:
+    - name: test-container
+      image: busybox
+      command: [ "/bin/sh", "-c", "env" ]
+      env:
+        - name: KUBE_CONFIG_1
+          valueFrom:
+            configMapKeyRef:
+              name: test-configmap
+              key: data-1
+        - name: KUBE_CONFIG_2
+          valueFrom:
+            configMapKeyRef:
+              name: test-configmap
+              key: data-2
+  restartPolicy: Never
+
+
+:wq (save and exit) 
+
+$ kubectl create -f env-pod.yaml
+
+$ kubectl get pod -n project1
+
+NAME                  READY   STATUS      RESTARTS   AGE
+config-env-test-pod   0/1     Completed   0          54s
+
+
+$ kubectl logs config-env-test-pod -n project1  | grep KUBE_CONFIG
+KUBE_CONFIG_1=value-1
+KUBE_CONFIG_2=value-2
+
+
+
+Example 3: Create a pod that sets the command line using ConfigMap
+##########
+
+$ vim command-pod.yaml
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: config-cmd-test-pod
+  namespace: project1
+spec:
+  containers:
+    - name: test-container
+      image: gcr.io/google_containers/busybox
+      command: [ "/bin/sh", "-c", "echo $(KUBE_CONFIG_1) $(KUBE_CONFIG_2)" ]
+      env:
+        - name: KUBE_CONFIG_1
+          valueFrom:
+            configMapKeyRef:
+              name: test-configmap
+              key: data-1
+        - name: KUBE_CONFIG_2
+          valueFrom:
+            configMapKeyRef:
+              name: test-configmap
+              key: data-2
+  restartPolicy: Never
+
+
+:wq (save and exit) 
+
+
+$ kubectl create -f command-pod.yaml
+
+
+$ kubectl get pod -n project1 
+NAME                  READY   STATUS      RESTARTS   AGE
+config-cmd-test-pod   0/1     Completed   0          29s
+config-env-test-pod   0/1     Completed   0          5m12s
+
+
+$ kubectl logs config-cmd-test-pod -n project1
+value-1 value-2
+
+
+Example 4: Create a pod that consumes a configMap in a volume
+##########
+
+$ vim volume-pod.yaml
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: config-volume-test-pod
+  namespace: project1
+spec:
+  containers:
+    - name: test-container
+      image: gcr.io/google_containers/busybox
+      command: [ "/bin/sh", "-c", "cat /etc/config/path/to/special-key" ]
+      volumeMounts:
+      - name: config-volume
+        mountPath: /etc/config
+  volumes:
+    - name: config-volume
+      configMap:
+        name: test-configmap
+        items:
+        - key: data-1
+          path: path/to/special-key
+  restartPolicy: Never
+
+
+:wq (save and exit) 
+
+$  kubectl create -f volume-pod.yaml
+
+$ kubectl get pod -n project1 
+NAME                     READY   STATUS      RESTARTS   AGE
+config-cmd-test-pod      0/1     Completed   0          2m45s
+config-env-test-pod      0/1     Completed   0          7m28s
+config-volume-test-pod   0/1     Completed   0          9s
+
+
+$ kubectl logs config-volume-test-pod -n project1
+value-1
+
+
+$ kubectl delete pod config-cmd-test-pod config-env-test-pod config-volume-test-pod -n project1
+$ kubectl delete cm test-configmap  -n project1
+
+
+Example 5: nginx Deployments with ConfigMap 
+##########
+
+
+Create a nginx.conf and index.html using ConfigMap 
+
+
+$ $ vim nginx-configmap.yaml
+
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nginx-conf
+  namespace: project1
+data:
+  nginx.conf: |
+    # This conf file is created by Admin and injected through ConfigMap
+    user nginx;
+    worker_processes  3;
+    error_log  /var/log/nginx/error.log;
+    events {
+      worker_connections  10240;
+    }
+    http {
+      log_format  main
+              'remote_addr:$remote_addr\t'
+              'time_local:$time_local\t'
+              'method:$request_method\t'
+              'uri:$request_uri\t'
+              'host:$host\t'
+              'status:$status\t'
+              'bytes_sent:$body_bytes_sent\t'
+              'referer:$http_referer\t'
+              'useragent:$http_user_agent\t'
+              'forwardedfor:$http_x_forwarded_for\t'
+              'request_time:$request_time';
+
+      access_log	/var/log/nginx/access.log main;
+
+      server {
+          listen       80;
+          server_name  _;
+
+          location / {
+              root   /usr/share/nginx/html;
+              index  index.html index.htm;
+          }
+      }
+    }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: index-html
+  namespace: project1
+data:
+  index.html: |
+    <html>
+    <body bgcolor=gold>
+    <marquee behavior=alternate>
+    <font face=arial size=6 color=blue>
+    Welcome to Nginx with ConfigMap
+    </font>
+    </marquee>
+    </body>
+    </html>
+
+:wq (save and exit) 
+
+
+Create ConfigMap for nginx Deployments
+
+$ kubectl apply -f nginx-configmap.yaml
+
+$ kubectl get cm -n project1
+
+NAME                   DATA   AGE
+index-html             1      15s
+nginx-conf             1      16s
+
+
+Create nginx Deployments file with Service 
+
+
+$ vim nginx-deployments-n-service.yaml
+
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  name: nginx
+  namespace: project1
+spec:
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: nginx
+    spec:
+      containers:
+      - name: nginx
+        image: nginx
+        ports:
+        - containerPort: 80
+        volumeMounts:
+        - mountPath: /etc/nginx # mount nginx-conf volumn to /etc/nginx
+          readOnly: true
+          name: nginx-conf
+        - mountPath: /usr/share/nginx/html # mount index.html to /usr/share/nginx/html/
+          readOnly: true
+          name: index-html
+        - mountPath: /var/log/nginx
+          name: log
+      volumes:
+      - name: nginx-conf
+        configMap:
+          name: nginx-conf # place ConfigMap `nginx-conf` on /etc/nginx
+          items:
+            - key: nginx.conf
+              path: nginx.conf
+      - name: index-html
+        configMap:
+          name: index-html # place ConfigMap `index-html` on /usr/share/nginx/html/
+          items:
+            - key: index.html
+              path: index.html
+      - name: log
+        emptyDir: {}
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx
+  namespace: project1
+spec:
+  type: LoadBalancer
+  ports:
+  - port: 80
+    targetPort: 80
+  selector:
+    app: nginx
+
+	
+	
+:wq (save and exit) 
+
+
+Create Deployments and Service for nginx: 
+
+$ kubectl apply -f nginx-deployments-n-service.yaml
+
+
+$ kubectl get pod -n project1
+
+NAME                     READY   STATUS    RESTARTS   AGE
+nginx-5fd9bc9dbd-94rmv   1/1     Running   0          47s
+
+
+$ kubectl get svc -n project1
+
+NAME    TYPE           CLUSTER-IP      EXTERNAL-IP     PORT(S)        AGE
+nginx   LoadBalancer   10.11.241.247   35.238.17.215   80:31871/TCP   77s
+
+
+$ kubectl get cm -n project1
+
+NAME                   DATA   AGE
+nginx-conf             2      113s
+
+
+$ kubectl exec -it nginx-5fd9bc9dbd-94rmv /bin/bash -n project1
+
+root@nginx-5fd9bc9dbd-94rmv:/# ls -l /etc/nginx/nginx.conf
+
+root@nginx-5fd9bc9dbd-94rmv:/# ls -l /etc/nginx/          
+root@nginx-5fd9bc9dbd-94rmv:/# cat /etc/nginx/nginx.conf
+root@nginx-5fd9bc9dbd-94rmv:/# ls -l /usr/share/nginx/html/
+root@nginx-5fd9bc9dbd-94rmv:/# cat /usr/share/nginx/html/index.html
+root@nginx-5fd9bc9dbd-94rmv:/# exit
+
+
+$ kubectl get svc -n project1
+
+NAME    TYPE           CLUSTER-IP      EXTERNAL-IP     PORT(S)        AGE
+nginx   LoadBalancer   10.11.241.247   35.238.17.215   80:31871/TCP   4m34s
+
+
+Open the Web Browser and point to the below service External IP to access Web Site: 
+
+http://35.238.17.215
+
+
+
+Delete ConfigMap, Deployments and Service 
+
+
+$ kubectl delete  -f nginx-deployments-n-service.yaml
+$ kubectl delete  -f nginx-configmap.yaml
+
+
+##############################################

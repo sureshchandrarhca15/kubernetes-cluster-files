@@ -1,0 +1,125 @@
+Lab4: Create a ReplicationController
+
+$ vim ReplicationController.yaml
+
+apiVersion: v1
+kind: ReplicationController
+metadata:
+  name: nginx
+  namespace: project1
+spec:
+  replicas: 2
+  selector:
+    project: lab4
+    service: web
+    version: "0.1"
+  template:
+    metadata:
+      name: nginx
+      labels:
+        project: lab4
+        service: web
+        version: "0.1"
+    spec:
+      containers:
+      - name: nginx
+        image: nginx
+        ports:
+        - containerPort: 80
+	  
+	  
+:wq (save and exit) 
+
+
+$ kubectl apply -f ReplicationController.yaml
+
+$ kubectl get rc -n project1
+
+NAME    DESIRED   CURRENT   READY   AGE
+nginx   2         2         2       70s
+
+
+$ kubectl get pod -n project1
+
+NAME          READY   STATUS    RESTARTS   AGE
+nginx-cwg8s   1/1     Running   0          103s
+nginx-jvvsg   1/1     Running   0          103s
+
+
+It shows we have two pods up and running. As described previously, ReplicationController
+manages all the pods matching the selector. If we create a pod with the same label
+manually, in theory, it should match the pod selector of the RC we just created. Let's try it
+out:
+
+
+$ vim self-create-pod.yaml
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: our-nginx
+  namespace: project1
+  labels:
+    project: lab3
+    service: web
+    version: "0.1"
+spec:
+  containers:
+  - name: nginx
+    image: nginx
+    ports:
+    - containerPort: 80
+	
+:wq (save and exit) 
+
+
+$ kubectl create -f self-create-pod.yaml ; kubectl get pod -n project1
+pod/our-nginx created
+NAME          READY   STATUS        RESTARTS   AGE
+nginx-cwg8s   1/1     Running       0          6m24s
+nginx-jvvsg   1/1     Running       0          6m24s
+our-nginx     0/1     Terminating   0          0s
+
+
+It's scheduled, and ReplicationController catches it. The amount of pods becomes three,
+which exceeds our desired count. The pod is eventually killed:
+
+
+If we want to scale on demand, we could simply use kubectl command to update the spec. 
+
+$ kubectl get rc -n project1
+
+NAME    DESIRED   CURRENT   READY   AGE
+nginx   2         2         2       8m38s
+
+
+change replica count from 2 to 5, default system editor will pop out.
+
+$ kubectl edit rc/nginx -n project1
+
+
+$ kubectl get rc -n project1
+
+NAME    DESIRED   CURRENT   READY   AGE
+nginx   5         5         5       10m
+
+
+$ kubectl get pod -n project1 
+
+NAME          READY   STATUS    RESTARTS   AGE
+nginx-47z4n   1/1     Running   0          6s
+nginx-8p9m8   1/1     Running   0          6s
+nginx-cwg8s   1/1     Running   0          9m52s
+nginx-fp2bj   1/1     Running   0          7s
+nginx-jvvsg   1/1     Running   0          9m52s
+
+
+$ kubectl describe rc nginx -n project1
+
+
+$ kubectl delete rc nginx -n project1
+
+$ kubectl get pod -n project1
+
+
+##############################################

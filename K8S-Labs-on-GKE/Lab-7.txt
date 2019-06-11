@@ -1,0 +1,359 @@
+Lab7: Create Service with ClusterIP For ReplicationController 
+
+Before starting a service, we'd like to create two sets of RC. 
+
+$ vim lab7-rc1.yaml
+
+apiVersion: v1
+kind: ReplicationController
+metadata:
+  name: nginx-1.12
+  namespace: project1
+spec:
+  replicas: 2
+  selector:
+    project: lab7
+    service: web
+    version: "0.1"
+  template:
+    metadata:
+      name: nginx
+      labels:
+        project: lab7
+        service: web
+        version: "0.1"
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:1.12.0
+        ports:
+        - containerPort: 80
+		
+:wq (save and exit) 
+
+
+$ vim lab7-rc2.yaml
+
+apiVersion: v1
+kind: ReplicationController
+metadata:
+  name: nginx-1.13
+  namespace: project1
+spec:
+  replicas: 2
+  selector:
+    project: lab7
+    service: web
+    version: "0.2"
+  template:
+    metadata:
+      name: nginx
+      labels:
+        project: lab7
+        service: web
+        version: "0.2"
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:1.13.1
+        ports:
+        - containerPort: 80
+
+:wq (save and exit) 
+
+
+$ kubectl apply -f lab7-rc1.yaml
+
+$ kubectl apply -f lab7-rc2.yaml
+
+$ kubectl get rc -n project1
+
+NAME         DESIRED   CURRENT   READY   AGE
+nginx-1.12   2         2         2       38s
+nginx-1.13   2         2         2       33s
+
+
+$ vim lab7-service.yaml
+
+kind: Service
+apiVersion: v1
+metadata:
+  name: nginx-service
+  namespace: project1
+spec:
+  selector:
+    project: lab7
+    service: web
+  ports:
+  - protocol: TCP
+    port: 80
+    targetPort: 80
+    name: http
+	
+:wq (save and exit) 
+
+
+$ kubectl apply -f lab7-service.yaml
+
+$ kubectl get svc -n project1
+
+NAME            TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)   AGE
+nginx-service   ClusterIP   10.39.242.175   <none>        80/TCP    22s
+
+
+$ kubectl describe  svc nginx-service -n project1
+Name:              nginx-service
+Namespace:         project1
+Labels:            <none>
+Annotations:       kubectl.kubernetes.io/last-applied-configuration:
+                     {"apiVersion":"v1","kind":"Service","metadata":{"annotations":{},"name":"nginx-service","namespace":"project1"},"spec":{"ports":[{"name":"...
+Selector:          project=lab5,service=web
+Type:              ClusterIP
+IP:                10.39.242.175
+Port:              http  80/TCP
+TargetPort:        80/TCP
+Endpoints:         10.36.0.19:80,10.36.1.104:80,10.36.2.86:80 + 1 more...
+Session Affinity:  None
+Events:            <none>
+
+
+By default, Kubernetes will expose seven environment variables for each service. In most
+cases, the first two will be used for using kube-dns addon to do service discovery for us:
+${SVCNAME}_SERVICE_HOST
+${SVCNAME}_SERVICE_PORT
+${SVCNAME}_PORT
+${SVCNAME}_PORT_${PORT}_${PROTOCAL}
+${SVCNAME}_PORT_${PORT}_${PROTOCAL}_PROTO
+${SVCNAME}_PORT_${PORT}_${PROTOCAL}_PORT
+${SVCNAME}_PORT_${PORT}_${PROTOCAL}_ADDR
+
+
+In our example, we'll use ${SVCNAME}_SERVICE_HOST in another pod to check if we could access our nginx pods:
+
+$ vim lab7-clusterip_chk.yaml
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: clusterip-chk
+  namespace: project1
+spec:
+  containers:
+  - name: centos
+    image: centos
+    command: ["/bin/sh", "-c", "while : ;do curl http://${NGINX_SERVICE_SERVICE_HOST}:80/; sleep 10; done"]
+	
+
+:wq (save and exit) 
+
+
+$ kubectl apply -f lab7-clusterip_chk.yaml
+
+$ kubectl get pod -n project1 
+
+NAME               READY   STATUS    RESTARTS   AGE
+clusterip-chk      1/1     Running   0          7m24s
+nginx-1.12-52xbk   1/1     Running   0          8s
+nginx-1.12-p2crw   1/1     Running   0          8s
+nginx-1.13-9nq8r   1/1     Running   0          4s
+nginx-1.13-k6crh   1/1     Running   0          3s
+
+
+$ kubectl logs  clusterip-chk -n project1
+
+
+
+
+Create a nodeport type service
+
+$ vim lab7-nodeport-service.yaml
+
+kind: Service
+apiVersion: v1
+metadata:
+  name: nginx-nodeport
+  namespace: project1
+spec:
+  type: NodePort
+  selector:
+    project: lab7
+    service: web
+  ports:
+  - protocol: TCP
+    port: 80
+    targetPort: 80
+    name: http
+
+:wq (save and exit) 
+
+
+$ kubectl apply -f lab7-nodeport-service.yaml
+
+$ kubectl get svc -n project1 
+
+NAME             TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)        AGE
+nginx-nodeport   NodePort    10.39.253.33    <none>        80:32070/TCP   21s
+nginx-service    ClusterIP   10.39.242.175   <none>        80/TCP         19m
+
+
+$ kubectl describe svc  nginx-nodeport -n project1
+Name:                     nginx-nodeport
+Namespace:                project1
+Labels:                   <none>
+Annotations:              kubectl.kubernetes.io/last-applied-configuration:
+                            {"apiVersion":"v1","kind":"Service","metadata":{"annotations":{},"name":"nginx-nodeport","namespace":"project1"},"spec":{"ports":[{"name":...
+Selector:                 project=lab5,service=web
+Type:                     NodePort
+IP:                       10.39.253.33
+Port:                     http  80/TCP
+TargetPort:               80/TCP
+NodePort:                 http  32070/TCP
+Endpoints:                10.36.0.20:80,10.36.1.105:80,10.36.1.106:80 + 1 more...
+Session Affinity:         None
+External Traffic Policy:  Cluster
+Events:                   <none>
+
+
+Delete the service and ReplicationController 
+
+
+$ kubectl delete  -f lab7-nodeport-service.yaml
+
+$ kubectl delete  -f lab7-service.yaml
+
+$ kubectl delete  -f lab7-clusterip_chk.yaml
+
+$ kubectl delete  -f lab7-rc1.yaml
+$ kubectl delete  -f lab7-rc2.yaml
+
+
+$ kubectl get all -n project1
+
+
+Create a Service to proxy Google
+
+Create a service without selectors
+
+$ vim google-proxy-svc.yaml
+
+kind: Service
+apiVersion: v1
+metadata:
+  name: google-proxy
+  namespace: project1
+spec:
+  ports:
+  - protocol: TCP
+    port: 80
+    targetPort: 80
+	
+
+:wq (save and exit) 
+
+
+$ kubectl apply -f google-proxy-svc.yaml
+
+$ kubectl get svc -n project1
+
+NAME             TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)        AGE
+google-proxy     ClusterIP   10.39.245.69    <none>        80/TCP         9s
+
+
+$ kubectl describe svc  google-proxy -n project1
+
+Name:              google-proxy
+Namespace:         project1
+Labels:            <none>
+Annotations:       kubectl.kubernetes.io/last-applied-configuration:
+                     {"apiVersion":"v1","kind":"Service","metadata":{"annotations":{},"name":"google-proxy","namespace":"project1"},"spec":{"ports":[{"port":80...
+Selector:          <none>
+Type:              ClusterIP
+IP:                10.39.245.69
+Port:              <unset>  80/TCP
+TargetPort:        80/TCP
+Endpoints:         <none>
+Session Affinity:  None
+Events:            <none>
+
+
+No Kubernetes endpoint will be created since there is no selector. Kubernetes doesn't know
+where to route the traffic since no selector could match the pods. We'll have to create that
+on our own.
+
+
+get an IP from google.com
+
+$ nslookup www.google.com
+Server:         169.254.169.254
+Address:        169.254.169.254#53
+
+Non-authoritative answer:
+Name:   www.google.com
+Address: 172.217.194.99
+Name:   www.google.com
+Address: 172.217.194.147
+Name:   www.google.com
+Address: 172.217.194.103
+Name:   www.google.com
+Address: 172.217.194.106
+Name:   www.google.com
+Address: 172.217.194.105
+Name:   www.google.com
+Address: 172.217.194.104
+
+
+
+create endpoints for the ip from google.com
+
+$ vim google-proxy-endpoint.yaml
+
+kind: Endpoints
+apiVersion: v1
+metadata:
+  name: google-proxy
+  namespace: project1
+subsets:
+  - addresses:
+    - ip: 172.217.194.104
+    ports:
+    - port: 80
+	
+:wq (save and exit)
+
+
+$ kubectl apply -f google-proxy-endpoint.yaml
+
+Let's create another pod in the cluster to access our Google proxy:
+
+$ vim google-proxy-check.yaml
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: proxy-chk
+  namespace: project1
+spec:
+  containers:
+  - name: centos
+    image: centos
+    command: ["/bin/sh", "-c", "while : ;do curl -L http://${GOOGLE_PROXY_SERVICE_HOST}:80/; sleep 10; done"]
+
+
+$ kubectl apply -f google-proxy-check.yaml
+
+
+Let's check the stdout from the pod:
+
+$ kubectl get pod  -n project1 
+
+NAME        READY   STATUS    RESTARTS   AGE
+proxy-chk   1/1     Running   0          47s
+
+$ kubectl logs proxy-chk -n project1
+
+$ kubectl delete pod/proxy-chk service/google-proxy -n project1
+
+$ kubectl get all -n project1
+
+
+##############################################

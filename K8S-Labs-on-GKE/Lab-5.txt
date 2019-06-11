@@ -1,0 +1,90 @@
+Lab5: Create a ReplicaSet
+
+$ vim ReplicaSet.yaml
+
+apiVersion: extensions/v1beta1
+kind: ReplicaSet
+metadata:
+  name: mysql
+  namespace: project1
+  # labels so that we can bind a Service to this Pod
+  labels:
+    app: mysql
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mysql
+  template:
+    metadata:
+      labels:
+        app: mysql
+    spec:
+      containers:
+      - name: database
+        image: mysql
+        resources:
+          requests:
+            cpu: 1
+            memory: 2Gi
+        env:
+        # Environment variables are not a best practice for security,
+        # but we're using them here for brevity in the example.
+        # See Chapter 11 for better options.
+        - name: MYSQL_ROOT_PASSWORD
+          value: some-password-here
+        livenessProbe:
+          tcpSocket:
+            port: 3306
+        ports:
+        - containerPort: 3306
+        #volumeMounts:
+        #  - name: database
+            # /var/lib/mysql is where MySQL stores its databases
+        #    mountPath: "/var/lib/mysql"
+      #volumes:
+      #- name: database
+      #  persistentVolumeClaim:
+      #    claimName: database
+
+
+:wq (save and exit)
+
+
+Create ReplicaSet 
+
+$ kubectl apply -f ReplicaSet.yaml
+
+
+List the Pod 
+
+$ kubectl get pod -n project1
+
+NAME          READY   STATUS    RESTARTS   AGE
+mysql-pqnwg   1/1     Running   0          14s 
+
+
+List the ReplicaSet 
+
+$ kubectl get rs -n project1
+
+NAME    DESIRED   CURRENT   READY   AGE
+mysql   1         1         1       32s
+
+
+Access MySQL Database from the Pod
+
+$ kubectl exec -it mysql-pqnwg /bin/bash -n project1
+root@mysql-pqnwg:/#
+root@mysql-pqnwg:/# mysql -uroot -psome-password-here
+mysql>exit 
+root@mysql-pqnwg:/#exit 
+
+
+Delete the ReplicaSet
+
+$ kubectl delete -f ReplicaSet.yaml
+
+$ kubectl get pod -n project1
+
+##############################################
