@@ -1,0 +1,45 @@
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  name: blue-nginx
+  namespace: blue-green
+spec:
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: blue-nginx
+    spec:
+      containers:
+      - name: nginx
+        image: nginx
+        ports:
+        - containerPort: 80
+        volumeMounts:
+        - mountPath: /etc/nginx/nginx.conf # mount nginx-conf volumn to /etc/nginx/nginx.conf
+          subPath: nginx.conf
+          readOnly: true
+          name: nginx-conf
+        - mountPath: /usr/share/nginx/html/index.html # mount index.html to /usr/share/nginx/html/index.html 
+          subPath: index.html
+          readOnly: true
+          name: index-html
+        - mountPath: /var/log/nginx
+          name: log
+      volumes:
+      - name: nginx-conf
+        configMap:
+          name: nginx-conf # place ConfigMap `nginx-conf` on /etc/nginx/nginx.conf
+          items:
+            - key: nginx.conf
+              path: nginx.conf
+      - name: index-html
+        configMap:
+          name: blue-index-html # place ConfigMap `index-html` on /usr/share/nginx/html/index.html 
+          items:
+            - key: index.html
+              path: index.html
+      - name: log
+        emptyDir: {}
+
+---
