@@ -1,0 +1,351 @@
+Lab 11: Blue/Green Deployments on Kubernetes
+#############################################
+
+Step 1: Create a Namespace for blue green 
+
+$ vim blue-green-namespace.yaml
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: blue-green
+
+
+:wq (save and exit) 
+
+
+$ kubectl create -f blue-green-namespace.yaml
+
+$ kubectl get namespace
+
+
+
+Step 2: Create the ConfigMap for Blue/Green 
+
+$ vim nginx-blue-green-configmap.yaml
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nginx-conf
+  namespace: blue-green
+data:
+  nginx.conf: |
+    # This conf file is created by Admin and injected through ConfigMap
+    user nginx;
+    worker_processes  3;
+    error_log  /var/log/nginx/error.log;
+    events {
+      worker_connections  10240;
+    }
+    http {
+      log_format  main
+              'remote_addr:$remote_addr\t'
+              'time_local:$time_local\t'
+              'method:$request_method\t'
+              'uri:$request_uri\t'
+              'host:$host\t'
+              'status:$status\t'
+              'bytes_sent:$body_bytes_sent\t'
+              'referer:$http_referer\t'
+              'useragent:$http_user_agent\t'
+              'forwardedfor:$http_x_forwarded_for\t'
+              'request_time:$request_time';
+
+      access_log        /var/log/nginx/access.log main;
+
+      server {
+          listen       80;
+          server_name  _;
+
+          location / {
+              root   /usr/share/nginx/html;
+              index  index.html index.htm;
+          }
+      }
+    }
+
+---
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: blue-index-html
+  namespace: blue-green
+data:
+  index.html: |
+    <html>
+    <body bgcolor=blue>
+    <marquee behavior=alternate>
+    <font face=arial size=6 color=white>
+    !!! Welcome to Nginx Blue Deployment !!!
+    </font>
+    </marquee>
+    </body>
+    </html>
+
+---
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: green-index-html
+  namespace: blue-green
+data:
+  index.html: |
+    <html>
+    <body bgcolor=green>
+    <marquee behavior=alternate>
+    <font face=arial size=6 color=white>
+    !!! Welcome to Nginx Green Deployment !!!
+    </font>
+    </marquee>
+    </body>
+    </html>
+---
+
+
+$ kubectl apply  -f nginx-blue-green-configmap.yaml
+
+$ kubectl get cm -n blue-green
+
+NAME               DATA   AGE
+blue-index-html    1      17s
+green-index-html   1      17s
+nginx-conf         1      18s
+
+
+
+
+Step 3: Create our "blue" deployment by saving the following yaml to a file "blue-deployment.yaml".
+
+$ vim blue-deployment.yaml
+
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  name: blue-nginx
+  namespace: blue-green
+spec:
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: blue-nginx
+    spec:
+      containers:
+      - name: nginx
+        image: nginx
+        ports:
+        - containerPort: 80
+        volumeMounts:
+        - mountPath: /etc/nginx/nginx.conf # mount nginx-conf volumn to /etc/nginx/nginx.conf
+          subPath: nginx.conf
+          readOnly: true
+          name: nginx-conf
+        - mountPath: /usr/share/nginx/html/index.html # mount index.html to /usr/share/nginx/html/index.html
+          subPath: index.html
+          readOnly: true
+          name: index-html
+        - mountPath: /var/log/nginx
+          name: log
+      volumes:
+      - name: nginx-conf
+        configMap:
+          name: nginx-conf # place ConfigMap `nginx-conf` on /etc/nginx/nginx.conf
+          items:
+            - key: nginx.conf
+              path: nginx.conf
+      - name: index-html
+        configMap:
+          name: blue-index-html # place ConfigMap `index-html` on /usr/share/nginx/html/index.html
+          items:
+            - key: index.html
+              path: index.html
+      - name: log
+        emptyDir: {}
+
+---
+
+:wq (save and exit) 
+
+
+$ kubectl apply -f blue-deployment.yaml
+
+$ kubectl get pod -n blue-green
+NAME                          READY   STATUS    RESTARTS   AGE
+blue-nginx-5448d7d964-l7jbm   1/1     Running   0          11s
+
+
+
+Step 4: Create Service Spec for Blue/Green Deployments. 
+
+$ vim blue-green-service.yaml
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: blue-green-nginx
+  namespace: blue-green
+spec:
+  type: LoadBalancer
+  ports:
+  - port: 80
+    targetPort: 80
+  selector:
+    app: blue-nginx
+
+---
+
+:wq (save and exit)
+
+
+$ kubectl apply -f blue-green-service.yaml
+
+$ kubectl get svc -n blue-green
+
+NAME               TYPE           CLUSTER-IP      EXTERNAL-IP      PORT(S)        AGE
+blue-green-nginx   LoadBalancer   10.11.255.135   35.225.176.133   80:31973/TCP   66s
+
+
+$ kubectl describe svc blue-green-nginx -n blue-green
+
+Name:                     blue-green-nginx
+Namespace:                blue-green
+Labels:                   <none>
+Annotations:              kubectl.kubernetes.io/last-applied-configuration:
+                            {"apiVersion":"v1","kind":"Service","metadata":{"annotations":{},"name":"blue-green-nginx","namespace":"blue-green"},"spec":{"ports":[{"po...
+Selector:                 app=blue-nginx
+Type:                     LoadBalancer
+IP:                       10.11.255.135
+LoadBalancer Ingress:     35.225.176.133
+Port:                     <unset>  80/TCP
+TargetPort:               80/TCP
+NodePort:                 <unset>  31973/TCP
+Endpoints:                10.8.1.66:80
+Session Affinity:         None
+External Traffic Policy:  Cluster
+Events:
+  Type    Reason                Age   From                Message
+  ----    ------                ----  ----                -------
+  Normal  EnsuringLoadBalancer  2m5s  service-controller  Ensuring load balancer
+  Normal  EnsuredLoadBalancer   75s   service-controller  Ensured load balancer
+
+
+Step 5: Open Web Browser and point to below URL to access blue-deployment App: 
+
+http://35.225.176.133
+
+
+Step 6: Create our "green" deployment by saving the following yaml to a file "green-deployment.yaml".
+
+$ vim green-deployment.yaml
+
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  name: green-nginx
+  namespace: blue-green
+spec:
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: green-nginx
+    spec:
+      containers:
+      - name: nginx
+        image: nginx
+        ports:
+        - containerPort: 80
+        volumeMounts:
+        - mountPath: /etc/nginx/nginx.conf # mount nginx-conf volumn to /etc/nginx/nginx.conf
+          subPath: nginx.conf
+          readOnly: true
+          name: nginx-conf
+        - mountPath: /usr/share/nginx/html/index.html # mount index.html to /usr/share/nginx/html/index.html
+          subPath: index.html
+          readOnly: true
+          name: index-html
+        - mountPath: /var/log/nginx
+          name: log
+      volumes:
+      - name: nginx-conf
+        configMap:
+          name: nginx-conf # place ConfigMap `nginx-conf` on /etc/nginx/nginx.conf
+          items:
+            - key: nginx.conf
+              path: nginx.conf
+      - name: index-html
+        configMap:
+          name: green-index-html # place ConfigMap `index-html` on /usr/share/nginx/html/index.html
+          items:
+            - key: index.html
+              path: index.html
+      - name: log
+        emptyDir: {}
+
+---
+
+:wq (save and exit) 
+
+
+$ kubectl apply -f green-deployment.yaml
+
+$ kubectl get pod -n blue-green
+
+NAME                           READY   STATUS    RESTARTS   AGE
+blue-nginx-5448d7d964-l7jbm    1/1     Running   0          10m
+green-nginx-777df6b694-r6hmw   1/1     Running   0          10s
+
+
+Note that, you will still have the blue-deployment app available on http://35.225.176.133 URL. 
+
+
+Step 7: Let's switch the traffic from blue-deployment App to green-deployment App by updating the service. 
+
+So open "blue-green-service.yaml" file and change the "selector -> labels from blue-nginx to green-nginx" 
+
+
+$ vim blue-green-service.yaml
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: blue-green-nginx
+  namespace: blue-green
+spec:
+  type: LoadBalancer
+  ports:
+  - port: 80
+    targetPort: 80
+  selector:
+    app: green-nginx		#	Change here from blue-nginx to green-nginx 
+
+---
+
+:wq (save and exit) 
+
+Step 8: Now apply the changes on cluster 
+
+$ kubectl apply -f blue-green-service.yaml
+
+Step 9: Go to the Web Browser and Refresg the Page, You should have access to green-deployment App: 
+
+http://35.225.176.133
+
+Step 10: Let's switch the traffic using "kubectl patch" command: 
+
+from green-deployment to blue-deployment App again 
+
+$ kubectl patch svc blue-green-nginx -p "{\"spec\":{\"selector\": {\"app\": \"blue-nginx\"}}}" -n blue-green
+
+from blue-deployment to green-deployment App again 
+
+$ kubectl patch svc blue-green-nginx -p "{\"spec\":{\"selector\": {\"app\": \"green-nginx\"}}}" -n blue-green
+
+
+
+######################################################################
