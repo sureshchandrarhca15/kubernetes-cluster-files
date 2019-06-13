@@ -1,0 +1,17 @@
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  name: hugo-app-green
+spec:
+  replicas: 5
+  template:
+    metadata:
+      labels:
+        app: hugo-app-green
+    spec:
+      containers:
+        - name: hugo-app
+          image: sureshchandrarhca15/hugo-app:green
+          ports:
+            - containerPort: 80
+
