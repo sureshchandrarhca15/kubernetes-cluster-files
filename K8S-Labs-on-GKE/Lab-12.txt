@@ -1,0 +1,734 @@
+Lab 12: Kubernetes Deployment Strategies: Rolling Updates, Canary & Blue-Green
+##############################################################################
+
+Step 1: Create a Docker images for the Hugo site
+
+Clone Git Repo: 
+
+$ git clone https://github.com/digitalcraftsman/hugo-material-docs.git \
+    hugo-app/themes/hugo-material-docs
+	
+$ cp -rf hugo-app/themes/hugo-material-docs/exampleSite/* hugo-app/
+
+$ rm -rf hugo-app/themes/hugo-material-docs/.git/
+
+$ sed -i -e 's|baseurl =.*|baseurl = "/"|g' hugo-app/config.toml
+
+
+Step 2: Create the GitHub repository for the Hugo site
+
+create a new GitHub repository in your GitHub account and then upload the contents of the Hugo site we just created.
+Configure your global Git settings with your username, email and set the password cache to 60 minutes:
+
+$ vim git-setting.sh 
+
+# Set your GitHub username and email
+export GITHUB_USERNAME="sureshchandrarhca15"
+export GITHUB_EMAIL="sureshchand.rhce@gmail.com"
+
+git config --global user.name "${GITHUB_USERNAME}"
+git config --global user.email "${GITHUB_EMAIL}"
+git config --global credential.helper cache
+git config --global credential.helper 'cache --timeout=3600'
+
+
+:wq (save and exit) 
+
+$ chmod  a+x git-setting.sh
+
+$ ./git-setting.sh
+
+
+
+Create a new GitHub repository called hugo-app in your GitHub account (you will be prompted for your GitHub password):
+
+$ curl -u "${GITHUB_USERNAME}" https://api.github.com/user/repos   -d '{"name":"hugo-app"}'
+
+
+
+Create the README.md file and the upload the contents of the Hugo site (hugo-app/) to the GitHub repository you just created 
+(you will be prompted for your GitHub credentials):
+
+$ echo "# hugo-app" >> hugo-app/README.md
+$ git -C hugo-app/ init
+$ git -C hugo-app/ add .
+$ git -C hugo-app/ commit -m "Create Hugo site repository"
+$ git -C hugo-app/ remote add origin https://github.com/${GITHUB_USERNAME}/hugo-app.git
+$ git -C hugo-app/ push -u origin master
+
+
+
+Step 3: Create the initial Docker image for the Hugo site
+
+Login to the Docker Hub (you will be prompted for your Docker Hub password):
+
+$ export DOCKER_HUB_USERNAME="sureshchandrarhca15"
+$ docker login -u ${DOCKER_HUB_USERNAME}
+
+
+
+Create a Dockerfile and Update MAINTAINER and ENV GITHUB_USERNAME in the Dockerfile with your information:
+
+$ vim docker/hugo-app/Dockerfile
+
+FROM nginx:alpine
+MAINTAINER Suresh Chandra <sureshchand.rhce@gmail>
+
+ENV HUGO_VERSION="0.20"
+ENV GITHUB_USERNAME="sureshchandrarhca15"
+ENV DOCKER_IMAGE_NAME="hugo-app"
+
+USER root
+
+RUN apk add --update \
+    wget \
+    git \
+    ca-certificates
+
+RUN wget --quiet https://github.com/spf13/hugo/releases/download/v${HUGO_VERSION}/hugo_${HUGO_VERSION}_Linux-64bit.tar.gz && \
+    tar -xf hugo_${HUGO_VERSION}_Linux-64bit.tar.gz && \
+    chmod +x hugo_${HUGO_VERSION}_linux_amd64/hugo_${HUGO_VERSION}_linux_amd64 && \
+    mv hugo_${HUGO_VERSION}_linux_amd64/hugo_${HUGO_VERSION}_linux_amd64 /usr/local/bin/hugo && \
+    rm -rf hugo_${HUGO_VERSION}_linux_amd64/ hugo_${HUGO_VERSION}_Linux-64bit.tar.gz
+
+RUN git clone https://github.com/${GITHUB_USERNAME}/${DOCKER_IMAGE_NAME}.git
+
+RUN hugo -s ${DOCKER_IMAGE_NAME} -d /usr/share/nginx/html/ --uglyURLs
+
+CMD nginx -g "daemon off;"
+
+
+:wq (save and exit) 
+
+
+
+Build a Docker image using the Dockerfile you just updated and push it to your Docker Hub Account. 
+
+$ export HUGO_APP_TAG="1.0"
+$ docker build -t ${DOCKER_HUB_USERNAME}/hugo-app:${HUGO_APP_TAG} --rm hugo-app/
+$ docker push ${DOCKER_HUB_USERNAME}/hugo-app:${HUGO_APP_TAG}
+$ docker rmi $(docker images --filter=reference="${DOCKER_HUB_USERNAME}/hugo-app" -q)
+
+
+
+Step 4: Create the Kubernetes Deployment for the Hugo site
+
+$ vim hugo-app-deploy.yaml
+
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  name: hugo-app
+spec:
+  replicas: 5
+  template:
+    metadata:
+      labels:
+        app: hugo-app
+    spec:
+      containers:
+        - name: hugo-app
+          image: sureshchandrarhca15/hugo-app:1.0
+          ports:
+            - containerPort: 80
+			
+
+:wq (save and exit) 
+
+
+You need to update the container image that the Deployment will use to the Docker image you just created. We will update the file using sed:
+
+$ sed -i -e "s|image: .*/|image: ${DOCKER_HUB_USERNAME}/|g" hugo-app-deploy.yaml
+
+$ cat hugo-app-deploy.yaml | grep image 
+
+
+Step 6: You are now ready to create the Deployment in your cluster:
+
+$ kubectl create -f hugo-app-deploy.yaml --record -n project1
+
+$ kubectl get pod -n project1
+
+$ kubectl get deployment -n project1
+
+$ kubectl describe deployment hugo-app -n project1
+
+
+Step 7: Create the Kubernetes Service for the Hugo site
+
+$ vim hugo-app-svc.yaml
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: hugo-app-svc
+  labels:
+    app: hugo-app
+spec:
+  type: LoadBalancer
+  ports:
+  - port: 80
+    targetPort: 80
+    protocol: TCP
+    name: http
+  selector:
+    app: hugo-app
+	
+:wq (save and exit)
+
+
+$ kubectl get svc  -n project1 | egrep 'NAME|hugo'
+
+NAME            TYPE           CLUSTER-IP      EXTERNAL-IP      PORT(S)        AGE
+hugo-app-svc    LoadBalancer   10.11.241.119   35.184.227.108   80:31730/TCP   108s
+
+
+$ kubectl describe svc hugo-app-svc -n project1
+
+
+Step 8: Create the DNS record for the Hugo site or use /etc/hosts file to resolve the site name. 
+
+in /etc/hosts file, add the below line : 
+
+35.184.227.108	hugo.example.com
+
+:wq (save and exit) 
+
+
+Step 9: Now Open Web Browser and point to the below URL to access hugo site: 
+
+http://hugo.example.com
+
+
+
+Congratulations, You have successfully Deployed hugo-app Site. 
+
+########################################################################
+
+
+
+Demo of Rolling Updates on hugo-app Site
+#########################################
+
+
+Step 1: Create additional Docker images for the Hugo site
+
+Before we proceed, let’s first make sure your credentials are setup for GitHub and the Docker Hub.
+
+$ ~/git-setting.sh
+
+$ export DOCKER_HUB_USERNAME="sureshchandrarhca15"
+$ docker login -u ${DOCKER_HUB_USERNAME}
+
+
+You are now ready to create the first Docker image with tag 'red', which is the default theme color:
+
+$ export HUGO_APP_TAG="red"
+$ docker build -t ${DOCKER_HUB_USERNAME}/hugo-app:${HUGO_APP_TAG} --rm hugo-app/
+$ docker push ${DOCKER_HUB_USERNAME}/hugo-app:${HUGO_APP_TAG}
+$ docker rmi $(docker images --filter=reference="${DOCKER_HUB_USERNAME}/hugo-app" -q)
+
+
+Now let’s create the Docker image with tag "yellow", but before we do so, we will change the theme color to yellow 
+in the Hugo config file and then commit the change to your GitHub repository 
+(you will be prompted for your GitHub credentials):
+
+
+$ export HUGO_APP_TAG="yellow"
+$ sed -i -e 's|primary = .*|primary = "'"${HUGO_APP_TAG}"'"|g' hugo-app/config.toml
+$ git -C hugo-app/ commit -a -m "Set theme color to ${HUGO_APP_TAG}"
+$ git -C hugo-app/ push -u origin master
+
+
+
+docker build -t ${DOCKER_HUB_USERNAME}/hugo-app:${HUGO_APP_TAG} --rm hugo-app/
+docker push ${DOCKER_HUB_USERNAME}/hugo-app:${HUGO_APP_TAG}
+docker rmi $(docker images --filter=reference="${DOCKER_HUB_USERNAME}/hugo-app" -q)
+
+
+
+Now let’s create the Docker image with tag "blue", but before we do so, we will change the theme color to blue 
+in the Hugo config file and then commit the change to your GitHub repository 
+(you will be prompted for your GitHub credentials):
+
+
+$ export HUGO_APP_TAG="blue"
+$ sed -i -e 's|primary = .*|primary = "'"${HUGO_APP_TAG}"'"|g' hugo-app/config.toml
+$ git -C hugo-app/ commit -a -m "Set theme color to ${HUGO_APP_TAG}"
+$ git -C hugo-app/ push -u origin master
+
+
+
+docker build -t ${DOCKER_HUB_USERNAME}/hugo-app:${HUGO_APP_TAG} --rm hugo-app/
+docker push ${DOCKER_HUB_USERNAME}/hugo-app:${HUGO_APP_TAG}
+docker rmi $(docker images --filter=reference="${DOCKER_HUB_USERNAME}/hugo-app" -q)
+
+
+Now let’s create the Docker image with tag "green", but before we do so, we will change the theme color to green 
+in the Hugo config file and then commit the change to your GitHub repository 
+(you will be prompted for your GitHub credentials):
+
+
+$ export HUGO_APP_TAG="green"
+$ sed -i -e 's|primary = .*|primary = "'"${HUGO_APP_TAG}"'"|g' hugo-app/config.toml
+$ git -C hugo-app/ commit -a -m "Set theme color to ${HUGO_APP_TAG}"
+$ git -C hugo-app/ push -u origin master
+
+
+
+docker build -t ${DOCKER_HUB_USERNAME}/hugo-app:${HUGO_APP_TAG} --rm hugo-app/
+docker push ${DOCKER_HUB_USERNAME}/hugo-app:${HUGO_APP_TAG}
+docker rmi $(docker images --filter=reference="${DOCKER_HUB_USERNAME}/hugo-app" -q)
+
+
+Step 2: Let's do the Rolling Updates for hugo-app Site for "yellow" Tag 
+
+Get the details of hugo-app deployment 
+
+$ kubectl get deployments -n project1 | egrep 'NAME|hugo'
+
+NAME            DESIRED   CURRENT   UP-TO-DATE   AVAILABLE   AGE
+hugo-app        5         5         5            5           31m
+
+
+We can now edit the configuration of the Deployment directly with kubectl to add additional options:
+
+$ kubectl edit deployments hugo-app -n project1
+
+This will bring up a text editor with the Deployment configuration, where you will add the line highlighted below to specify the "minReadySeconds" setting, which will set a 20 second grace period after a Pod is started before it is considered ready (for the purpose of the demonstration):
+
+Spec section will look like the following: 
+
+.....
+spec:
+  minReadySeconds: 20						# This line added 
+  progressDeadlineSeconds: 2147483647
+  replicas: 5
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      app: hugo-app
+  strategy:
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 1
+    type: RollingUpdate
+  template:
+.....
+
+
+Step 2:  Now scale up the Deployment to increase the amount of Pods to 10:
+
+$ kubectl scale deployment hugo-app --replicas 10 -n project1
+
+$ kubectl get deployment -n project1 | egrep 'NAME|hugo'
+
+NAME            DESIRED   CURRENT   UP-TO-DATE   AVAILABLE   AGE
+hugo-app        10        10        10           10          46m
+
+
+$ kubectl get pod -n project1 | egrep 'NAME|hugo'
+
+NAME                             READY   STATUS    RESTARTS   AGE
+hugo-app-8fb587f6f-48b4x         1/1     Running   0          46m
+hugo-app-8fb587f6f-74842         1/1     Running   0          54s
+hugo-app-8fb587f6f-7ckfg         1/1     Running   0          54s
+hugo-app-8fb587f6f-cpckw         1/1     Running   0          54s
+hugo-app-8fb587f6f-dq66k         1/1     Running   0          54s
+hugo-app-8fb587f6f-lfmch         1/1     Running   0          46m
+hugo-app-8fb587f6f-m2tzq         1/1     Running   0          46m
+hugo-app-8fb587f6f-p88kt         1/1     Running   0          46m
+hugo-app-8fb587f6f-qn2qt         1/1     Running   0          46m
+hugo-app-8fb587f6f-ww4lj         1/1     Running   0          54s
+
+
+Step 3: Now let’s update the Docker image that the Deployment is using to yellow and then immediately pause the rollout:
+
+$ kubectl set image deploy/hugo-app hugo-app=${DOCKER_HUB_USERNAME}/hugo-app:yellow -n project1 && kubectl rollout pause deploy/hugo-app -n project1 
+
+
+Step 4: Monitor the status of the rollout:
+
+$ kubectl rollout status deploy/hugo-app -n project1
+
+Waiting for deployment "hugo-app" rollout to finish: 2 out of 10 new replicas have been updated...
+
+
+Step 5:  Resume the rollout and Monitor the status 
+
+$ kubectl rollout resume deploy/hugo-app -n project1
+$ kubectl rollout status deploy/hugo-app -n project1
+
+You will see the below output: 
+
+Waiting for deployment "hugo-app" rollout to finish: 4 out of 10 new replicas have been updated...
+Waiting for deployment "hugo-app" rollout to finish: 4 out of 10 new replicas have been updated...
+Waiting for deployment "hugo-app" rollout to finish: 4 out of 10 new replicas have been updated...
+Waiting for deployment "hugo-app" rollout to finish: 6 out of 10 new replicas have been updated...
+Waiting for deployment "hugo-app" rollout to finish: 6 out of 10 new replicas have been updated...
+Waiting for deployment "hugo-app" rollout to finish: 6 out of 10 new replicas have been updated...
+Waiting for deployment "hugo-app" rollout to finish: 6 out of 10 new replicas have been updated...
+Waiting for deployment "hugo-app" rollout to finish: 6 out of 10 new replicas have been updated...
+Waiting for deployment "hugo-app" rollout to finish: 8 out of 10 new replicas have been updated...
+Waiting for deployment "hugo-app" rollout to finish: 8 out of 10 new replicas have been updated...
+Waiting for deployment "hugo-app" rollout to finish: 8 out of 10 new replicas have been updated...
+Waiting for deployment "hugo-app" rollout to finish: 8 out of 10 new replicas have been updated...
+Waiting for deployment "hugo-app" rollout to finish: 8 out of 10 new replicas have been updated...
+Waiting for deployment "hugo-app" rollout to finish: 1 old replicas are pending termination...
+Waiting for deployment "hugo-app" rollout to finish: 1 old replicas are pending termination...
+Waiting for deployment "hugo-app" rollout to finish: 1 old replicas are pending termination...
+Waiting for deployment "hugo-app" rollout to finish: 1 old replicas are pending termination...
+
+
+Step 6: To confirm that the rolling update has been completed successfully, 
+refresh your browser and you should see that the theme color has changed to yellow:
+
+
+Step 7: Let's do the Rolling Updates for hugo-app Site for "green" Tag
+
+Now let’s update the Docker image that the Deployment is using to "green" Tag 
+
+$ kubectl set image deploy/hugo-app hugo-app=${DOCKER_HUB_USERNAME}/hugo-app:green -n project1
+
+
+Step 8: Monitor the status of the rollout:
+
+$ kubectl rollout status deploy/hugo-app -n project1
+
+Step 9: To confirm that the rolling update has been completed successfully, 
+refresh your browser and you should see that the theme color has changed to green:
+
+
+Congratulations, You have successfully Done Rolling Updates for hugo-app Site. 
+
+########################################################################
+
+
+
+
+Demo of Rolling back a Deployment
+##################################
+
+
+If you encounter a problem during or after a rolling update, it is possible to rollback to a previous version.
+
+Step 1: Check the rollout history for the Deployment, where we will see the two commands that have been recorded 
+
+$ kubectl rollout history deployment hugo-app -n project1
+deployment.extensions/hugo-app
+REVISION  CHANGE-CAUSE
+1         kubectl create --filename=hugo-app-deploy.yaml --record=true --namespace=project1
+2         kubectl create --filename=hugo-app-deploy.yaml --record=true --namespace=project1
+3         kubectl create --filename=hugo-app-deploy.yaml --record=true --namespace=project1
+
+
+
+Step 2: Let’s now rollback the Deployment to it’s previous state: 
+
+$ kubectl rollout undo deploy/hugo-app -n project1
+
+Step 3: To confirm that the rolling back has been completed successfully, 
+refresh your browser and you should see that the theme color has changed to green:
+
+
+Step 4: Let’s now make a a few different updates, going from red to yellow, yellow to blue and then blue to green:
+
+$ kubectl set image deploy/hugo-app hugo-app=${DOCKER_HUB_USERNAME}/hugo-app:yellow -n project1 
+$ kubectl set image deploy/hugo-app hugo-app=${DOCKER_HUB_USERNAME}/hugo-app:blue -n project1 
+$ kubectl set image deploy/hugo-app hugo-app=${DOCKER_HUB_USERNAME}/hugo-app:green -n project1 
+$ kubectl set image deploy/hugo-app hugo-app=${DOCKER_HUB_USERNAME}/hugo-app:red -n project1 
+
+$ kubectl rollout history deployment hugo-app -n project1
+
+deployment.extensions/hugo-app
+REVISION  CHANGE-CAUSE
+5         kubectl create --filename=hugo-app-deploy.yaml --record=true --namespace=project1
+6         kubectl create --filename=hugo-app-deploy.yaml --record=true --namespace=project1
+7         kubectl create --filename=hugo-app-deploy.yaml --record=true --namespace=project1
+9         kubectl create --filename=hugo-app-deploy.yaml --record=true --namespace=project1
+10        kubectl create --filename=hugo-app-deploy.yaml --record=true --namespace=project1
+
+Step 5: You can rollback to a specific version using the revision number. Let’s rollback to revision number 6:
+
+$ kubectl rollout undo deploy/hugo-app --to-revision=6 -n project1
+
+Step 6: To confirm that the rolling back has been completed successfully, 
+refresh your browser and you should see that the theme color has changed to red:
+
+
+Congratulations, You have successfully Done Rolling back for hugo-app Site. 
+
+Let's delete it: 
+
+$ kubectl delete deploy hugo-app -n project1
+$ kubectl delete svc hugo-app-svc -n project1
+
+
+
+########################################################################
+
+
+
+
+Demo of Blue-Green Deployments
+###############################
+
+Step 1: Create a Blue Deployment for hugo-app Site spec file 
+
+
+$ vim hugo-app-blue-deploy.yaml
+
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  name: hugo-app-blue
+spec:
+  replicas: 5
+  template:
+    metadata:
+      labels:
+        app: hugo-app-blue
+    spec:
+      containers:
+        - name: hugo-app
+          image: sureshchandrarhca15/hugo-app:blue
+          ports:
+            - containerPort: 80
+
+:wq (save and exit) 
+
+
+$ kubectl apply -f hugo-app-blue-deploy.yaml -n project1
+
+$ kubectl get deployment -n project1
+$ kubectl get pod -n project1
+
+
+Step 2: Create the Service for blue-green hugo-app deployment:
+
+$ vim hugo-app-blue-green-svc.yaml
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: hugo-app-blue-green-svc
+spec:
+  type: LoadBalancer
+  ports:
+  - port: 80
+    targetPort: 80
+    protocol: TCP
+    name: http
+  selector:
+    app: hugo-app-blue
+
+:wq (save and exit) 
+
+$ kubectl apply -f hugo-app-blue-green-svc.yaml -n project1
+
+$ kubectl get svc -n project1 | egrep 'NAME|hugo-app-blue-green-svc'
+
+NAME                      TYPE           CLUSTER-IP      EXTERNAL-IP      PORT(S)        AGE
+hugo-app-blue-green-svc   LoadBalancer   10.11.255.12    35.184.227.108   80:31539/TCP   2m43s
+
+$ kubectl describe svc hugo-app-blue-green-svc -n project1
+
+
+Step 3: Open Web Browser and point to "hugo-app-blue-green-svc" Service EXTERNAL-IP to access hugo-app blue site: 
+
+http://35.184.227.108
+
+
+
+Step 4: Create a Green Deployment for hugo-app Site spec file 
+
+
+$ vim hugo-app-green-deploy.yaml
+
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  name: hugo-app-green
+spec:
+  replicas: 5
+  template:
+    metadata:
+      labels:
+        app: hugo-app-green
+    spec:
+      containers:
+        - name: hugo-app
+          image: sureshchandrarhca15/hugo-app:green
+          ports:
+            - containerPort: 80
+
+:wq (save and exit) 
+
+
+$ kubectl apply -f hugo-app-green-deploy.yaml -n project1
+
+$ kubectl get deployment -n project1
+$ kubectl get pod -n project1
+
+
+Step 5: Update "hugo-app-blue-green-svc" Service to poin to green deployment of hugo-app site: 
+
+$ kubectl patch svc hugo-app-blue-green-svc -p "{\"spec\":{\"selector\": {\"app\": \"hugo-app-green\"}}}" -n project1
+
+
+Step 6: refresh the browser and you should have access to green deployment of hugo-app site. 
+
+
+Congratulations, You have successfully Done Blue/Green Deployment for hugo-app Site. 
+
+
+Let's delete it: 
+
+$ kubectl delete -f hugo-app-blue-green-svc.yaml -n project1
+$ kubectl delete -f hugo-app-blue-deploy.yaml -n project1
+$ kubectl delete -f hugo-app-green-deploy.yaml -n project1
+
+########################################################################
+
+
+
+
+Demo of Canary Deployments
+###########################
+
+
+Step 1: Create a Deployment Spec file for hugo-app Site  
+
+
+$ vim hugo-app-canary-red-deploy.yaml
+
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  name: hugo-app-red
+spec:
+  replicas: 5
+  template:
+    metadata:
+      labels:
+        app: hugo-app-canary
+        track: stable
+    spec:
+      containers:
+        - name: hugo-app
+          image: sureshchandrarhca15/hugo-app:red
+          ports:
+            - containerPort: 80
+
+:wq (save and exit) 
+
+
+$ kubectl apply -f hugo-app-canary-red-deploy.yaml -n project1
+
+$ kubectl get deployment -n project1
+$ kubectl get pod -n project1
+
+
+Step 2: Create the Service for hugo-app deployment:
+
+$ vim hugo-app-canary-svc.yaml
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: hugo-app-canary-svc
+spec:
+  type: LoadBalancer
+  ports:
+  - port: 80
+    targetPort: 80
+    protocol: TCP
+    name: http
+  selector:
+    app: hugo-app-canary
+
+:wq (save and exit) 
+
+$ kubectl apply -f hugo-app-canary-svc.yaml -n project1
+
+$ kubectl get svc -n project1 | egrep 'NAME|hugo-app-canary-svc'
+
+$ kubectl get pods --label-columns=track -n project1 | egrep 'NAME|hugo'
+NAME                             READY   STATUS    RESTARTS   AGE     TRACK
+hugo-app-red-5776c9b96b-2tbv9    1/1     Running   0          5m33s   stable
+hugo-app-red-5776c9b96b-f78wf    1/1     Running   0          5m33s   stable
+hugo-app-red-5776c9b96b-n59tq    1/1     Running   0          5m33s   stable
+hugo-app-red-5776c9b96b-v25p7    1/1     Running   0          5m33s   stable
+hugo-app-red-5776c9b96b-zx8cx    1/1     Running   0          5m33s   stable
+
+
+Step 3: Create a Deployment Spec file for hugo-app Site with blue tag for Canary  
+
+
+$ vim hugo-app-canary-blue-deploy.yaml
+
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  name: hugo-app-blue
+spec:
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: hugo-app-canary
+        track: canary
+    spec:
+      containers:
+        - name: hugo-app
+          image: sureshchandrarhca15/hugo-app:blue
+          ports:
+            - containerPort: 80
+
+:wq (save and exit) 
+
+
+$ kubectl apply -f hugo-app-canary-blue-deploy.yaml -n project1
+
+$ kubectl get deployment -n project1
+$ $ kubectl get pod --label-columns=track -n project1 | egrep 'NAME|hugo'
+
+NAME                             READY   STATUS    RESTARTS   AGE    TRACK
+hugo-app-blue-cf9499d88-jrr92    1/1     Running   0          75s    canary
+hugo-app-red-5776c9b96b-2tbv9    1/1     Running   0          9m6s   stable
+hugo-app-red-5776c9b96b-f78wf    1/1     Running   0          9m6s   stable
+hugo-app-red-5776c9b96b-n59tq    1/1     Running   0          9m6s   stable
+hugo-app-red-5776c9b96b-v25p7    1/1     Running   0          9m6s   stable
+hugo-app-red-5776c9b96b-zx8cx    1/1     Running   0          9m6s   stable
+
+
+
+Step 4: Let's scale down the stable release and scale up canary release: 
+
+$ kubectl scale deployment hugo-app-blue --replicas=5 -n project1
+$ kubectl scale deployment hugo-app-red --replicas=1 -n project1
+
+$ kubectl get pod --label-columns=track -n project1 | egrep 'NAME|hugo'
+NAME                             READY   STATUS    RESTARTS   AGE     TRACK
+hugo-app-blue-cf9499d88-hnfbv    1/1     Running   0          33s     canary
+hugo-app-blue-cf9499d88-jj4lz    1/1     Running   0          33s     canary
+hugo-app-blue-cf9499d88-jrr92    1/1     Running   0          5m59s   canary
+hugo-app-blue-cf9499d88-r4b6g    1/1     Running   0          33s     canary
+hugo-app-blue-cf9499d88-xpl7v    1/1     Running   0          33s     canary
+hugo-app-red-5776c9b96b-f78wf    1/1     Running   0          13m     stable
+
+
+
+Congratulations, You have successfully Done Canary Deployment for hugo-app Site. 
+
+
+Let's delete it: 
+
+$ kubectl delete -f hugo-app-canary-red-deploy.yaml -n project1
+$ kubectl delete -f hugo-app-canary-blue-deploy.yaml -n project1
+$ kubectl delete -f hugo-app-canary-svc.yaml -n project1
+
+
+Reference Link: https://kumorilabs.com/blog/k8s-4-deployments-rolling-updates-canary-blue-green-kubernetes/
+
+############################################################################################################
