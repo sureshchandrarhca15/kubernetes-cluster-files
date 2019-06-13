@@ -525,4 +525,9 @@ You can continue to adjust the weights and watch the traffic getting rerouted dy
 
 Congratulations, You have successfully distributed the traffic to v1 and v2 version of the App. 
 
+
+Reference Links for Istio:
+https://thenewstack.io/tutorial-blue-green-deployments-with-kubernetes-and-istio/
+https://supergiant.io/blog/introduction-to-istio-service-mesh-for-kubernetes/
+
 ################################################################################################
