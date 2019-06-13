@@ -1,0 +1,528 @@
+Lab 13: Deployments and Traffic Management Using Istio 
+######################################################
+
+Step 1: Download and install Istio on Kubernetes Cluster 
+
+$ curl -L https://git.io/getLatestIstio | sh -
+
+$ cd istio-1.0.8
+
+$ export PATH=$PWD/bin:$PATH
+
+
+Step 2: Create Istio’s Custo Resource Definitions via kubectl apply.
+
+$ kubectl apply -f install/kubernetes/helm/istio/templates/crds.yaml
+
+
+Step 3:  Install Istio without mutual TLS authentication between sidecards
+
+$ kubectl apply -f install/kubernetes/istio-demo.yaml
+
+It took close to 5 minutes for Kubernetes to download and start all the istio related pods.
+
+
+Step 4: You can check if all the pods are running by executing following command.
+
+$ kubectl get pod -n istio-system
+
+NAME                                      READY   STATUS      RESTARTS   AGE
+grafana-7ffdd5fb74-9n885                  1/1     Running     0          56s
+istio-citadel-55547b9d7d-fxxhf            1/1     Running     0          53s
+istio-cleanup-secrets-226gr               0/1     Completed   0          85s
+istio-egressgateway-547674c54c-f4xtn      1/1     Running     0          57s
+istio-galley-674886fb99-6hj6f             1/1     Running     0          58s
+istio-grafana-post-install-pgfpz          0/1     Completed   0          89s
+istio-ingressgateway-74c55b9c58-7d475     1/1     Running     0          57s
+istio-pilot-7bb5b666f9-6mxvd              2/2     Running     0          54s
+istio-policy-75b854b44d-bfk8s             2/2     Running     0          55s
+istio-security-post-install-z8qsp         0/1     Completed   0          83s
+istio-sidecar-injector-649b4fd549-mf8x8   1/1     Running     0          52s
+istio-telemetry-6b7cb6bb8b-r2njf          2/2     Running     0          55s
+istio-tracing-6445d6dbbf-4zts4            1/1     Running     0          51s
+prometheus-65d6f6b6c-vdq4p                1/1     Running     0          54s
+servicegraph-9c89c458-xn7l2               1/1     Running     0          52s
+
+
+All the pods must be in running or complete mode, which indicates that Istio is successfully installed and configured.
+
+
+Step 5: Deploying a helloworld example application
+
+We all start by adding istio-injection label to project1 namespace
+
+$ kubectl label namespace project1 istio-injection=enabled --overwrite
+
+$ kubectl get namespace project1 -o yaml
+
+
+Create the specs file for helloworld application: 
+
+$ vim 01-helloworld-svc.yaml
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: helloworld
+  labels:
+    app: helloworld
+spec:
+  ports:
+  - port: 5000
+    name: http
+  selector:
+    app: helloworld	
+---
+
+:wq (save and exit) 
+
+
+$ kubectl apply -f 01-helloworld-svc.yaml -n project1
+
+
+$ vim 02-helloworld-v1.yaml
+
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  name: helloworld-v1
+spec:
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: helloworld
+        version: v1
+    spec:
+      containers:
+      - name: helloworld
+        image: istio/examples-helloworld-v1
+        resources:
+          requests:
+            cpu: "100m"
+        imagePullPolicy: IfNotPresent #Always
+        ports:
+        - containerPort: 5000		
+---
+
+:wq (save and exit) 
+
+$ kubectl apply -f 02-helloworld-v1.yaml -n project1
+
+
+$ vim 03-helloworld-v2.yaml
+
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  name: helloworld-v2
+spec:
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: helloworld
+        version: v2
+    spec:
+      containers:
+      - name: helloworld
+        image: istio/examples-helloworld-v2
+        resources:
+          requests:
+            cpu: "100m"
+        imagePullPolicy: IfNotPresent #Always
+        ports:
+        - containerPort: 5000		
+---
+
+:wq (save and exit) 
+
+
+$ kubectl apply -f 03-helloworld-v2.yaml -n project1
+
+
+$ kubectl get deployment -n project1
+NAME            DESIRED   CURRENT   UP-TO-DATE   AVAILABLE   AGE
+helloworld-v1   1         1         1            1           79s
+helloworld-v2   1         1         1            1           60s
+
+
+$ kubectl get svc -n project1
+NAME            TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)    AGE
+helloworld      ClusterIP   10.11.249.40    <none>        5000/TCP   65s
+
+
+$ kubectl get pod -n project1
+NAME                             READY   STATUS    RESTARTS   AGE
+helloworld-v1-7b984f4489-ww659   2/2     Running   0          2m2s
+helloworld-v2-9948f5495-srm9l    2/2     Running   0          103s
+
+
+$ kubectl describe svc helloworld -n project1
+
+Name:              helloworld
+Namespace:         project1
+Labels:            app=helloworld
+Annotations:       kubectl.kubernetes.io/last-applied-configuration:
+                     {"apiVersion":"v1","kind":"Service","metadata":{"annotations":{},"labels":{"app":"helloworld"},"name":"helloworld","namespace":"project1"}...
+Selector:          app=helloworld
+Type:              ClusterIP
+IP:                10.11.249.40
+Port:              http  5000/TCP
+TargetPort:        5000/TCP
+Endpoints:         10.8.0.57:5000,10.8.2.74:5000
+Session Affinity:  None
+Events:            <none>
+
+
+
+Step 6: Create the Istio Gateway 
+
+$ vim 04-helloworld-gateway.yaml
+
+apiVersion: networking.istio.io/v1alpha3
+kind: Gateway
+metadata:
+  name: helloworld-gateway
+spec:
+  selector:
+    istio: ingressgateway # use istio default controller
+  servers:
+  - port:
+      number: 80
+      name: http
+      protocol: HTTP
+    hosts:
+    - "*"
+	
+:wq (save and exit) 
+
+
+$ kubectl apply -f 04-helloworld-gateway.yaml -n project1
+
+$ kubectl get gateway -n project1
+NAME                 AGE
+helloworld-gateway   29s
+
+
+Step 7: Create a VirtualService which defines a set of traffic routing rules to apply when a host is addressed. 
+
+
+$ vim 05-helloworld-virtualservice.yaml
+
+apiVersion: networking.istio.io/v1alpha3
+kind: VirtualService
+metadata:
+  name: helloworld
+spec:
+  hosts:
+  - "*"
+  gateways:
+  - helloworld-gateway
+  http:
+  - match:
+    - uri:
+        exact: /hello
+    route:
+    - destination:
+        host: helloworld
+        port:
+          number: 5000
+		  
+:wq (save and exit) 
+
+
+$ kubectl apply -f 05-helloworld-virtualservice.yaml -n project1
+
+$ kubectl get virtualservice -n project1
+NAME         AGE
+helloworld   25s
+
+
+Step 8: Now, let’s go ahead and access the App. 
+
+First get the EXTERNAL-IP of istio-ingressgateway by using below command: 
+
+$ kubectl get svc -n istio-system | egrep 'NAME|ingressgateway' | awk '{print $1,$4}'
+
+NAME EXTERNAL-IP
+istio-ingressgateway 35.184.227.108
+
+Now open another terminal and use the below command to access the app:
+
+$ while true ; do curl 35.184.227.108/hello ; done 
+
+
+The output will be 
+
+Hello version: v1, instance: helloworld-v1-7c45d5f8c4-fhv87
+
+If you make another call, output will be following
+
+Hello version: v2, instance: helloworld-v2-69f69868b4-f7jc9
+
+This is because the service is doing round robin (50:50) to two pods. 
+The first pod runs version v1 of the application and second pod runs version v2 of the application.
+
+
+
+Step 9: Create the DestinationRule which defines policies that apply to traffic intended for a service after routing has occurred. 
+Notice how the rule is declared based on the labels defined in the original Kubernetes deployment.
+
+$ vim 06-helloworld-destinationrule.yaml
+
+apiVersion: networking.istio.io/v1alpha3
+kind: DestinationRule
+metadata:
+  name: helloworld
+spec:
+  host: helloworld
+  subsets:
+  - name: v1
+    labels:
+      version: v1
+  - name: v2
+    labels:
+      version: v2
+
+:wq (save and exit) 
+
+
+$ kubectl apply -f 06-helloworld-destinationrule.yaml -n project1
+
+$ kubectl get destinationrule -n project1
+NAME         AGE
+helloworld   31s
+
+
+
+Step 10: Now we need to modify VirtualService Spec file to distribute the traffic between v1 and v2 version. 
+
+$ vim 07-helloworld-virtualservice.yaml
+
+apiVersion: networking.istio.io/v1alpha3
+kind: VirtualService
+metadata:
+  name: helloworld
+spec:
+  hosts:
+  - "*"
+  gateways:
+  - helloworld-gateway
+  http:
+  - match:
+    - uri:
+        exact: /hello
+    route:
+    - destination:
+        host: helloworld
+        port:
+          number: 5000
+        subset: v1
+      weight: 90
+    - destination:
+        host: helloworld
+        port:
+          number: 5000
+        subset: v2
+      weight: 10
+
+:wq (save and exit) 
+
+
+
+$ kubectl apply -f 07-helloworld-virtualservice.yaml -n project1
+
+Now open another terminal and use the below command to access the app:
+
+$ while true ; do export GREP_COLOR='1;33'; curl -s 35.184.227.108/hello |  grep --color=always "v1" ; export GREP_COLOR='1;36';curl -s 35.184.227.108/hello | grep --color=always "v2" ; sleep 1; done
+
+
+Congratulations, You have successfully distributed the traffic to v1 and v2 version of the App. 
+
+################################################################################################
+
+
+
+
+
+Blue/Green Deployments with Istio
+#################################
+
+
+Step 1: Deploying two versions of the same application
+
+$ vim myapp.yaml 
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: myapp
+  labels:
+    app: myapp
+spec:
+  type: ClusterIP
+  ports:
+  - port: 80
+    name: http
+  selector:
+    app: myapp
+---
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  name: myapp-v1
+spec:
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: myapp
+        version: v1
+    spec:
+      containers:
+      - name: myapp
+        image: janakiramm/myapp:v1
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 80
+---
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  name: myapp-v2
+spec:
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: myapp
+        version: v2
+    spec:
+      containers:
+      - name: myapp
+        image: janakiramm/myapp:v2
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 80
+		
+:wq (save and exit) 
+
+
+$ kubectl apply -f myapp.yaml -n project1
+
+$ kubectl get pod  -n project1 | egrep 'NAME|myapp'
+NAME                             READY   STATUS    RESTARTS   AGE
+myapp-v1-b78d9cdfd-w55b2         2/2     Running   0          52s
+myapp-v2-755499f456-mf9cm        2/2     Running   0          51s
+
+
+$ kubectl get svc  -n project1 | egrep 'NAME|myapp'
+NAME            TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)    AGE
+myapp           ClusterIP   10.11.241.65    <none>        80/TCP     78s
+
+
+
+Step 2: Create a Istio Gateway, DestinationRule and VirtualService for myapp 
+
+$ vim myapp-gw-dr-vs.yaml
+
+apiVersion: networking.istio.io/v1alpha3
+kind: Gateway
+metadata:
+  name: app-gateway
+spec:
+  selector:
+    istio: ingressgateway
+  servers:
+  - port:
+      number: 80
+      name: http
+      protocol: HTTP
+    hosts:
+    - "*"
+
+---
+
+apiVersion: networking.istio.io/v1alpha3
+kind: DestinationRule
+metadata:
+  name: myapp
+spec:
+  host: myapp
+  subsets:
+  - name: version1
+    labels:
+      version: v1
+  - name: version2
+    labels:
+      version: v2
+	  
+---
+
+apiVersion: networking.istio.io/v1alpha3
+kind: VirtualService
+metadata:
+  name: myapp
+spec:
+  hosts:
+  - "*"
+  gateways:
+  - app-gateway
+  http:
+    - route:
+      - destination:
+          host: myapp
+          subset: version1
+        weight: 50
+      - destination:
+          host: myapp
+          subset: version2
+        weight: 50   
+		
+---
+
+:wq (save and exit) 
+
+$ kubectl apply -f myapp-gw-dr-vs.yaml -n project1
+
+
+Step 3: Now, let’s go ahead and access the App. 
+
+First get the EXTERNAL-IP of istio-ingressgateway by using below command: 
+
+$ kubectl get svc -n istio-system | egrep 'NAME|ingressgateway' | awk '{print $1,$4}'
+
+NAME EXTERNAL-IP
+istio-ingressgateway 35.184.227.108
+
+
+If you access the below URI from the browser, you will see the traffic getting routed evenly between blue and green pages.
+
+http://35.184.227.108 
+
+
+
+We can see the result from a terminal window. Run the below command from the terminal window to see alternating response from V1 and V2.
+
+$ while true ; do export GREP_COLOR='1;33'; curl -s 35.184.227.108 |  grep --color=always "V1" ; export GREP_COLOR='1;36';curl -s 35.184.227.108 | grep --color=always "vNext" ; sleep 1; done
+
+
+Step 4: While the above command is running in a loop, let’s go back to the "myapp-gw-dr-vs.yaml" file to adjust the weights. 
+Set the weight of version1 to 0 and version2 to 100.
+
+
+Step 5: Submit the new definition to Istio.
+
+~/istio-1.0.8/bin/istioctl replace -f myapp-gw-dr-vs.yaml -n project1
+
+
+Immediately after updating the weights, version2 will get 100 percent of the traffic. This is visible from the output of the first terminal window.
+
+
+You can continue to adjust the weights and watch the traffic getting rerouted dynamically without incurring any downtime.
+
+
+Congratulations, You have successfully distributed the traffic to v1 and v2 version of the App. 
+
+################################################################################################
