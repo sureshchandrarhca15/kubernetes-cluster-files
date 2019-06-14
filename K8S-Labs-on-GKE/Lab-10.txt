@@ -682,3 +682,7 @@ Now the below lines in "hosts" file to resolve the above URLs:
 34.66.129.247   v2.example.com
 
 ###############################################################################
+
+Reference Link: How to reload Secrets and ConfigMap
+
+https://github.com/stakater/Reloader#Configmap
