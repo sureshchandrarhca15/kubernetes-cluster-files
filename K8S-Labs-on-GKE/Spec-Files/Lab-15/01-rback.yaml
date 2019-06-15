@@ -1,0 +1,48 @@
+apiVersion: rbac.authorization.k8s.io/v1beta1
+kind: Role
+metadata:
+  namespace: dev
+  name: dev-deployer
+rules:
+- apiGroups: ["","apps","extensions"]
+  resources: ["deployments","configmaps","pods","secrets","ingresses","services"]
+  verbs: ["create","get","delete","list","update","edit","watch","exec","patch","logs"]
+---
+apiVersion: rbac.authorization.k8s.io/v1beta1
+kind: Role
+metadata:
+  namespace: dev
+  name: dev-pod-reader
+rules:
+- apiGroups: ["*"]
+  resources: ["pods"]
+  verbs: ["get","describe","list","watch","exec"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: dev-deployer
+  namespace: dev
+roleRef:
+  kind: Role
+  name: dev-deployer
+  apiGroup: rbac.authorization.k8s.io
+subjects:
+- kind: ServiceAccount
+  namespace: dev
+  name: dev-sa-deployer
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: dev-pod-reader
+  namespace: dev
+roleRef:
+  kind: Role
+  name: dev-pod-reader
+  apiGroup: rbac.authorization.k8s.io
+subjects:
+- kind: ServiceAccount
+  namespace: dev
+  name: dev-sa-pod-reader
+
