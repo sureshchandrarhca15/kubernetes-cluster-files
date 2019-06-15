@@ -1,0 +1,496 @@
+Lab 15: Using RBAC Authorization
+################################
+
+Step 1: Create two namespaces "dev" and "prod"
+
+$ vim 00-namespace.yaml
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: dev
+  labels:
+    env: dev
+
+:wq (save and exit) 
+
+
+$ kubectl apply -f 00-namespace.yaml
+
+$ kubectl get namespace
+
+NAME          STATUS   AGE
+default       Active   5d9h
+dev           Active   11s
+kube-public   Active   5d9h
+kube-system   Active   5d9h
+	
+
+Step 2: Create the "deployer" and "pod-reader" ServiceAccount for dev namespace
+
+$ kubectl create serviceaccount dev-sa-deployer -n dev
+$ kubectl create serviceaccount dev-sa-pod-reader -n dev
+
+
+Step 3: Get the details of ServiceAccount 
+
+$ kubectl get sa -n dev
+
+NAME                SECRETS   AGE
+default             1         26m
+dev-sa-deployer     1         2m17s
+dev-sa-pod-reader   1         34s
+
+
+$ kubectl get secrets -n dev
+
+NAME                            TYPE                                  DATA   AGE
+default-token-6ttt9             kubernetes.io/service-account-token   3      27m
+dev-sa-deployer-token-4rp5r     kubernetes.io/service-account-token   3      2m44s
+dev-sa-pod-reader-token-nv9tq   kubernetes.io/service-account-token   3      61s
+
+
+Step 4: Extract the token for both of the ServiceAccount in a file as below: 
+
+$ kubectl describe secret dev-sa-deployer-token-4rp5r -n dev | grep ^token | awk '{print $2}' > ~/dev-sa-deployer-token.txt
+$ kubectl describe secret dev-sa-pod-reader-token-nv9tq -n dev | grep ^token | awk '{print $2}' > ~/dev-sa-pod-reader-token.txt
+
+
+
+Step 5: Create Role and RoleBinding for deployer and pod-reader ServiceAccounts 
+
+$ vim 01-rback.yaml
+
+apiVersion: rbac.authorization.k8s.io/v1beta1
+kind: Role
+metadata:
+  namespace: dev
+  name: dev-deployer
+rules:
+- apiGroups: ["","apps","extensions"]
+  resources: ["deployments","configmaps","pods","secrets","ingresses","services"]
+  verbs: ["create","get","delete","list","update","edit","watch","exec","patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1beta1
+kind: Role
+metadata:
+  namespace: dev
+  name: dev-pod-reader
+rules:
+- apiGroups: ["*"]
+  resources: ["pods"]
+  verbs: ["get","describe","list","watch","exec"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: dev-deployer
+  namespace: dev
+roleRef:
+  kind: Role
+  name: dev-deployer
+  apiGroup: rbac.authorization.k8s.io
+subjects:
+- kind: ServiceAccount
+  namespace: dev
+  name: dev-sa-deployer
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: dev-pod-reader
+  namespace: dev
+roleRef:
+  kind: Role
+  name: dev-pod-reader
+  apiGroup: rbac.authorization.k8s.io
+subjects:
+- kind: ServiceAccount
+  namespace: dev
+  name: dev-sa-pod-reader
+  
+:wq (save and exit) 
+
+
+$ kubectl apply -f 01-rback.yaml
+
+$ kubectl get role -n dev
+NAME             AGE
+dev-deployer     12s
+dev-pod-reader   12s
+
+$ kubectl describe role dev-deployer -n dev
+Name:         dev-deployer
+Labels:       <none>
+Annotations:  kubectl.kubernetes.io/last-applied-configuration:
+                {"apiVersion":"rbac.authorization.k8s.io/v1beta1","kind":"Role","metadata":{"annotations":{},"name":"dev-deployer","namespace":"dev"},"rul...
+PolicyRule:
+  Resources               Non-Resource URLs  Resource Names  Verbs
+  ---------               -----------------  --------------  -----
+  configmaps              []                 []              [create get delete list update edit watch exec patch]
+  deployments             []                 []              [create get delete list update edit watch exec patch]
+  ingresses               []                 []              [create get delete list update edit watch exec patch]
+  pods                    []                 []              [create get delete list update edit watch exec patch]
+  secrets                 []                 []              [create get delete list update edit watch exec patch]
+  configmaps.apps         []                 []              [create get delete list update edit watch exec patch]
+  deployments.apps        []                 []              [create get delete list update edit watch exec patch]
+  ingresses.apps          []                 []              [create get delete list update edit watch exec patch]
+  pods.apps               []                 []              [create get delete list update edit watch exec patch]
+  secrets.apps            []                 []              [create get delete list update edit watch exec patch]
+  configmaps.extensions   []                 []              [create get delete list update edit watch exec patch]
+  deployments.extensions  []                 []              [create get delete list update edit watch exec patch]
+  ingresses.extensions    []                 []              [create get delete list update edit watch exec patch]
+  pods.extensions         []                 []              [create get delete list update edit watch exec patch]
+  secrets.extensions      []                 []              [create get delete list update edit watch exec patch]
+  services.extensions     []                 []              [create get delete list update edit watch exec patch]
+  
+  
+$ kubectl describe role dev-pod-reader  -n dev 
+Name:         dev-pod-reader
+Labels:       <none>
+Annotations:  kubectl.kubernetes.io/last-applied-configuration:
+                {"apiVersion":"rbac.authorization.k8s.io/v1beta1","kind":"Role","metadata":{"annotations":{},"name":"dev-pod-reader","namespace":"dev"},"r...
+PolicyRule:
+  Resources  Non-Resource URLs  Resource Names  Verbs
+  ---------  -----------------  --------------  -----
+  pods.*     []                 []              [get describe list watch exec]
+  
+  
+
+$ kubectl get rolebinding -n dev
+NAME             AGE
+dev-deployer     88s
+dev-pod-reader   87s
+
+
+$ kubectl describe rolebinding dev-pod-reader -n dev
+Name:         dev-pod-reader
+Labels:       <none>
+Annotations:  kubectl.kubernetes.io/last-applied-configuration:
+                {"apiVersion":"rbac.authorization.k8s.io/v1","kind":"RoleBinding","metadata":{"annotations":{},"name":"dev-pod-reader","namespace":"dev"},...
+Role:
+  Kind:  Role
+  Name:  dev-pod-reader
+Subjects:
+  Kind            Name               Namespace
+  ----            ----               ---------
+  ServiceAccount  dev-sa-pod-reader  dev
+  
+  
+$ kubectl describe rolebinding dev-deployer -n dev
+Name:         dev-deployer
+Labels:       <none>
+Annotations:  kubectl.kubernetes.io/last-applied-configuration:
+                {"apiVersion":"rbac.authorization.k8s.io/v1","kind":"RoleBinding","metadata":{"annotations":{},"name":"dev-deployer","namespace":"dev"},"r...
+Role:
+  Kind:  Role
+  Name:  dev-deployer
+Subjects:
+  Kind            Name             Namespace
+  ----            ----             ---------
+  ServiceAccount  dev-sa-deployer  dev
+
+
+
+Step 6: Get the Kubernetes Cluster  and kubectl version details 
+
+$ kubectl cluster-info
+Kubernetes master is running at https://34.66.35.93
+GLBCDefaultBackend is running at https://34.66.35.93/api/v1/namespaces/kube-system/services/default-http-backend:http/proxy
+Heapster is running at https://34.66.35.93/api/v1/namespaces/kube-system/services/heapster/proxy
+KubeDNS is running at https://34.66.35.93/api/v1/namespaces/kube-system/services/kube-dns:dns/proxy
+Metrics-server is running at https://34.66.35.93/api/v1/namespaces/kube-system/services/https:metrics-server:/proxy
+
+
+$ kubectl version
+Client Version: version.Info{Major:"1", Minor:"12+", GitVersion:"v1.12.8-dispatcher", GitCommit:"1215389331387f57594b42c5dd024a2fe27334f8", GitTreeState:"clean", BuildDate:"2019-05-13T18:09:56Z", GoVersion:"go1.10.8", Compiler:"gc", Platform:"linux/amd64"}
+Server Version: version.Info{Major:"1", Minor:"12+", GitVersion:"v1.12.7-gke.10", GitCommit:"8d9b8641e72cf7c96efa61421e87f96387242ba1", GitTreeState:"clean", BuildDate:"2019-04-12T22:59:24Z", GoVersion:"go1.10.8b4", Compiler:"gc", Platform:"linux/amd64"}
+
+
+
+Note that, you can connect to Kubernetes Cluster by using https://34.66.35.93 IP Address.
+	and kubectl version is 1.12.8 
+
+
+Step 7: Install kubectl command (save version 1.12.8) on different machine to connect Kubernetes Cluster
+		You can use the below steps to install kubectl 
+		
+		sam@vm1:~$ curl -LO https://storage.googleapis.com/kubernetes-release/release/v1.12.8/bin/linux/amd64/kubectl
+		sam@vm1:~$ chmod +x ./kubectl
+		sam@vm1:~$ sudo mv ./kubectl /usr/local/bin/kubectl
+		sam@vm1:~$ kubectl version
+
+
+Step 8: Add a Cluster and User credentials (ServiceAccount dev-deployer) to kubectl
+
+sam@vm1:~$ kubectl config set-cluster dev-deployer --server=https://34.66.35.93 --insecure-skip-tls-verify=true
+
+sam@vm1:~$ kubectl config set-credentials dev-deployer --token=$(cat ~/dev-sa-deployer-token.txt) 
+
+sam@vm1:~$ kubectl config set-context dev-deployer --cluster=dev-deployer --user=dev-deployer --namespace dev
+
+sam@vm1:~$ kubectl config use-context dev-deployer
+
+sam@vm1:~$ kubectl config get-contexts
+
+
+
+Step 9: Get the list of Pod, deployments, ConfigMap, secret etc. 
+
+sam@vm1:~$ kubectl  get pod
+
+sam@vm1:~$ kubectl  get deployments
+
+sam@vm1:~$ kubectl  get cm
+
+sam@vm1:~$ kubectl  get secret
+
+NAME                            TYPE                                  DATA   AGE
+default-token-6ttt9             kubernetes.io/service-account-token   3      57m
+dev-sa-deployer-token-4rp5r     kubernetes.io/service-account-token   3      33m
+dev-sa-pod-reader-token-nv9tq   kubernetes.io/service-account-token   3      31m
+
+
+Step 10: Create a ConfigMap and Deployment of nginx 
+
+sam@vm1:~$ vim 02-nginx-configmap.yaml
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nginx-conf
+  namespace: dev
+data:
+  nginx.conf: |
+    # This conf file is created by Admin and injected through ConfigMap Updating ConfigMap
+    user nginx;
+    worker_processes  3;
+    error_log  /var/log/nginx/error.log;
+    events {
+      worker_connections  10240;
+    }
+    http {
+      log_format  main
+              'remote_addr:$remote_addr\t'
+              'time_local:$time_local\t'
+              'method:$request_method\t'
+              'uri:$request_uri\t'
+              'host:$host\t'
+              'status:$status\t'
+              'bytes_sent:$body_bytes_sent\t'
+              'referer:$http_referer\t'
+              'useragent:$http_user_agent\t'
+              'forwardedfor:$http_x_forwarded_for\t'
+              'request_time:$request_time';
+
+      access_log        /var/log/nginx/access.log main;
+
+      server {
+          listen       80;
+          server_name  _;
+
+          location / {
+              root   /usr/share/nginx/html;
+              index  index.html index.htm;
+          }
+      }
+    }
+
+---
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: index-html
+  namespace: dev
+data:
+  index.html: |
+    <html>
+    <body bgcolor=gold>
+    <marquee behavior=alternate>
+    <font face=arial size=6 color=blue>
+    Welcome to Nginx Dev Namespace
+    </font>
+    </marquee>
+    </body>
+    </html>
+
+---
+
+:wq (save and exit) 
+
+
+sam@vm1:~$ kubectl apply -f 02-nginx-configmap.yaml
+
+sam@vm1:~$ kubectl  get cm
+NAME         DATA   AGE
+index-html   1      12s
+nginx-conf   1      14s
+
+
+
+sam@vm1:~$ vim 03-nginx-deployments.yaml
+
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  name: dev-nginx
+  namespace: dev
+spec:
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: dev-nginx
+    spec:
+      containers:
+      - name: nginx
+        image: nginx
+        ports:
+        - containerPort: 80
+        volumeMounts:
+        - mountPath: /etc/nginx/nginx.conf # mount nginx-conf volumn to /etc/nginx/nginx.conf
+          subPath: nginx.conf
+          readOnly: true
+          name: nginx-conf
+        - mountPath: /usr/share/nginx/html/index.html # mount index.html to /usr/share/nginx/html/index.html
+          subPath: index.html
+          readOnly: true
+          name: index-html
+        - mountPath: /var/log/nginx
+          name: log
+      volumes:
+      - name: nginx-conf
+        configMap:
+          name: nginx-conf # place ConfigMap `nginx-conf` on /etc/nginx/nginx.conf
+          items:
+            - key: nginx.conf
+              path: nginx.conf
+      - name: index-html
+        configMap:
+          name: index-html # place ConfigMap `index-html` on /usr/share/nginx/html/index.html
+          items:
+            - key: index.html
+              path: index.html
+      - name: log
+        emptyDir: {}
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dev-nginx
+  namespace: dev
+spec:
+  type: LoadBalancer
+  ports:
+  - port: 80
+    targetPort: 80
+  selector:
+    app: dev-nginx
+
+	
+:wq (save and exit) 
+
+
+sam@vm1:~$ kubectl apply -f 03-nginx-deployments.yaml
+
+sam@vm1:~$ kubectl  get deployment
+
+NAME        DESIRED   CURRENT   UP-TO-DATE   AVAILABLE   AGE
+dev-nginx   1         1         1            1           2m20s
+sam@vm1:~$ kubectl  get pod
+
+NAME                         READY   STATUS    RESTARTS   AGE
+dev-nginx-685f7c88b4-8jk9n   1/1     Running   0          2m31s
+
+sam@vm1:~$ kubectl  get svc
+
+NAME        TYPE           CLUSTER-IP      EXTERNAL-IP     PORT(S)        AGE
+dev-nginx   LoadBalancer   10.11.243.228   35.239.188.59   80:30927/TCP   2m36s
+sam@vm1:~$ kubectl  get cm
+NAME         DATA   AGE
+index-html   1      3m1s
+nginx-conf   1      3m2s
+
+
+
+Step 11: Add a Cluster and User credentials (ServiceAccount dev-pod-reader) to kubectl
+
+sam@vm1:~$ kubectl config set-cluster dev-pod-reader --server=https://34.66.35.93 --insecure-skip-tls-verify=true
+
+sam@vm1:~$ kubectl config set-credentials dev-pod-reader --token=$(cat ~/dev-sa-pod-reader-token.txt) 
+
+sam@vm1:~$ kubectl config set-context dev-pod-reader --cluster=dev-pod-reader --user=dev-pod-reader --namespace dev
+
+sam@vm1:~$ kubectl config use-context dev-pod-reader
+
+sam@vm1:~$ kubectl config get-contexts
+CURRENT   NAME             CLUSTER          AUTHINFO         NAMESPACE
+          dev-deployer     dev-deployer     dev-deployer     dev
+*         dev-pod-reader   dev-pod-reader   dev-pod-reader   dev
+
+
+
+Try to list the pod 
+
+sam@vm1:~$ kubectl get pod
+NAME                         READY   STATUS    RESTARTS   AGE
+dev-nginx-685f7c88b4-8jk9n   1/1     Running   0          9m29s
+
+
+Try to list ConfigMap, Deployment, Secret etc. 
+
+sam@vm1:~$ kubectl get cm
+Error from server (Forbidden): configmaps is forbidden: User "system:serviceaccount:dev:dev-sa-pod-reader" cannot list resource "configmaps" in API group "" in the namespace "dev"
+
+sam@vm1:~$ kubectl get secret
+Error from server (Forbidden): secrets is forbidden: User "system:serviceaccount:dev:dev-sa-pod-reader" cannot list resource "secrets" in API group "" in the namespace "dev"
+
+sam@vm1:~$ kubectl get deployment
+Error from server (Forbidden): deployments.extensions is forbidden: User "system:serviceaccount:dev:dev-sa-pod-reader" cannot list resource "deployments" in API group "extensions" in the namespace "dev"
+
+
+
+Step 12: lets switch to dev-deployer user context 
+
+sam@vm1:~$ kubectl config get-contexts
+
+CURRENT   NAME             CLUSTER          AUTHINFO         NAMESPACE
+          dev-deployer     dev-deployer     dev-deployer     dev
+*         dev-pod-reader   dev-pod-reader   dev-pod-reader   dev
+sam@vm1:~$ kubectl config use-context dev-deployer
+
+Switched to context "dev-deployer".
+
+sam@vm1:~$ kubectl config get-contexts
+CURRENT   NAME             CLUSTER          AUTHINFO         NAMESPACE
+*         dev-deployer     dev-deployer     dev-deployer     dev
+          dev-pod-reader   dev-pod-reader   dev-pod-reader   dev
+
+
+Try to list ConfigMap, Deployment, Secret etc. 
+
+sam@vm1:~$ kubectl get pod
+NAME                         READY   STATUS    RESTARTS   AGE
+dev-nginx-685f7c88b4-8jk9n   1/1     Running   0          12m
+
+sam@vm1:~$ kubectl get cm
+NAME         DATA   AGE
+index-html   1      12m
+nginx-conf   1      12m
+
+sam@vm1:~$ kubectl get secret
+NAME                            TYPE                                  DATA   AGE
+default-token-6ttt9             kubernetes.io/service-account-token   3      100m
+dev-sa-deployer-token-4rp5r     kubernetes.io/service-account-token   3      76m
+dev-sa-pod-reader-token-nv9tq   kubernetes.io/service-account-token   3      74m
+
+sam@vm1:~$ kubectl get svc
+NAME        TYPE           CLUSTER-IP      EXTERNAL-IP     PORT(S)        AGE
+dev-nginx   LoadBalancer   10.11.243.228   35.239.188.59   80:30927/TCP   12m
+
+
+Congratulations, you have successfully configured RBAC on Kubernetes Cluster.
+
+#######################################################################################
