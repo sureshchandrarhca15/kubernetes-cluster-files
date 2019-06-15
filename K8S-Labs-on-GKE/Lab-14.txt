@@ -1,0 +1,168 @@
+Lab 15: Kubernetes Monitoring using Prometheus
+###############################################
+
+Step 1: Deploying Alertmanager
+
+Before deploying, please update “<your_slack_hook>” , “<your_victorops_hook>” , ‘<YOUR_API_KEY>’ . 
+If you use a notification channel other than these, please follow the below documentation and update the config accordingly: 
+
+https://prometheus.io/docs/alerting/configuration/
+
+
+$ kubectl apply -f Lab-14/alertmanager/
+
+
+This will create the following:
+
+1. A monitoring namespace.
+2. Config-map to be used by alertmanager to manage channels for alerting.
+3. Alertmanager deployment with 1 replica running.
+4. Service with Google Internal Loadbalancer IP
+
+
+$ kubectl get pod -n monitoring
+
+NAME                                     READY   STATUS    RESTARTS   AGE
+alertmanager-596fb97c68-vvf8s            1/1     Running   0          21h
+
+
+$ kubectl get svc -n monitoring
+
+NAME                 TYPE           CLUSTER-IP      EXTERNAL-IP       PORT(S)             AGE
+alertmanager         LoadBalancer   10.11.251.187   35.232.48.3       9093:30305/TCP      21h
+
+$ kubectl get cm -n monitoring
+
+NAME                     DATA   AGE
+alertmanager             1      21h
+
+
+
+In your browser, navigate to http://<Alertmanager-Svc-Ext-Ip>:9093 and you should see the alertmanager console.
+
+
+
+Step 2: Deploying Prometheus
+
+$ kubectl apply -f Lab-14/prometheus/
+
+This will create the following:
+
+1. Service account, cluster-role and cluster-role-binding needed for prometheus.
+2. Prometheus config map which details the scrape configs and alertmanager endpoint. 
+3. Prometheus config map for the alerting rules.
+4. Prometheus deployment with 1 replica running.
+5. Service with Google Internal Loadbalancer IP 
+
+
+$ kubectl get pod -n monitoring 
+NAME                                     READY   STATUS    RESTARTS   AGE
+alertmanager-596fb97c68-vvf8s            1/1     Running   0          21h
+prometheus-deployment-8666959dc5-876h2   1/1     Running   0          20h
+
+
+$ kubectl get svc -n monitoring
+NAME                 TYPE           CLUSTER-IP      EXTERNAL-IP       PORT(S)             AGE
+alertmanager         LoadBalancer   10.11.251.187   35.232.48.3       9093:30305/TCP      21h
+prometheus-service   LoadBalancer   10.11.255.191   35.238.95.21      8080:32613/TCP      20h
+
+$ kubectl get cm -n monitoring
+NAME                     DATA   AGE
+alertmanager             1      21h
+prometheus-rules         1      20h
+prometheus-server-conf   1      20h
+
+
+In your browser, navigate to http://<Prometheus-Svc-Ext-Ip>:8080 and you should see the prometheus console. 
+
+
+Step 3: Deploying Kube-State-Metrics
+
+$ kubectl apply -f Lab-14/kube-state-metrics/
+
+
+This will create the following:
+
+1. Service account, cluster-role and cluster-role-binding needed for kube-state-metrics.
+2. Kube-state-metrics deployment with 1 replica running.
+3. In-cluster service which will be scraped by prometheus for metrics.
+
+
+$ kubectl get pod -n monitoring
+NAME                                     READY   STATUS    RESTARTS   AGE
+alertmanager-596fb97c68-vvf8s            1/1     Running   0          21h
+kube-state-metrics-766ffc76fc-xqr4c      2/2     Running   0          20h
+prometheus-deployment-8666959dc5-876h2   1/1     Running   0          20h
+
+
+$ kubectl get svc -n monitoring
+NAME                 TYPE           CLUSTER-IP      EXTERNAL-IP       PORT(S)             AGE
+alertmanager         LoadBalancer   10.11.251.187   35.232.48.3       9093:30305/TCP      21h
+kube-state-metrics   ClusterIP      10.11.244.228   <none>            8080/TCP,8081/TCP   20h
+prometheus-service   LoadBalancer   10.11.255.191   35.238.95.21      8080:32613/TCP      20h
+
+
+Step 4: Deploying Grafana
+
+
+$ kubectl apply -f Lab-14/grafana/
+
+This will create the following:
+
+1. Grafana deployment with 1 replica running.
+2. Service with Google Internal Loadbalancer IP
+
+
+$ kubectl get pod -n monitoring 
+NAME                                     READY   STATUS    RESTARTS   AGE
+alertmanager-596fb97c68-vvf8s            1/1     Running   0          21h
+grafana-7f99994bc4-zf9dg                 1/1     Running   0          20h
+kube-state-metrics-766ffc76fc-xqr4c      2/2     Running   0          20h
+prometheus-deployment-8666959dc5-876h2   1/1     Running   0          20h
+
+
+$ kubectl get svc -n monitoring
+NAME                 TYPE           CLUSTER-IP      EXTERNAL-IP       PORT(S)             AGE
+alertmanager         LoadBalancer   10.11.251.187   35.232.48.3       9093:30305/TCP      21h
+grafana              LoadBalancer   10.11.249.41    104.198.225.127   3000:32352/TCP      20h
+kube-state-metrics   ClusterIP      10.11.244.228   <none>            8080/TCP,8081/TCP   20h
+prometheus-service   LoadBalancer   10.11.255.191   35.238.95.21      8080:32613/TCP      20h
+
+
+
+Step 5: add the prometheus server as the data source in grafana and start creating dashboards.
+
+http://104.198.225.127:3000
+
+
+Create the datasource with following config: 
+
+
+Name: DS_Prometheus
+
+Type: Prometheus
+
+URL: http://prometheus-service:8080
+
+
+Click on Save and Test. 
+
+You should see "Data source is working" Messgaes. 
+
+
+Step 6: Now import the below json files into grafana to create Dashboard 
+
+Path: Lab-14/dashboards/
+Files:	1. Kubernetes App Metrics.json
+		2. Kubernetes cluster monitoring (via Prometheus).json
+		3. Kubernetes Deployment metrics.json
+		4. Kubernetes Nodes - 01 (Node Exporter).json
+		5. Kubernetes Nodes - 02(Node Exporter).json
+		6. Kubernetes Pod Metrics.json
+		
+		
+Congratulations, You have successfully configured prometheus monitoring tool on Kubernetes Cluster. 
+
+Reference Link: https://medium.com/faun/production-grade-kubernetes-monitoring-using-prometheus-78144b835b60
+
+############################################################################################################
