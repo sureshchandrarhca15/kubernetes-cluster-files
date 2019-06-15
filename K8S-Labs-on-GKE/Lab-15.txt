@@ -1,7 +1,7 @@
 Lab 15: Using RBAC Authorization
 ################################
 
-Step 1: Create two namespaces "dev" and "prod"
+Step 1: Create a namespaces "dev"
 
 $ vim 00-namespace.yaml
 
@@ -489,6 +489,174 @@ dev-sa-pod-reader-token-nv9tq   kubernetes.io/service-account-token   3      74m
 sam@vm1:~$ kubectl get svc
 NAME        TYPE           CLUSTER-IP      EXTERNAL-IP     PORT(S)        AGE
 dev-nginx   LoadBalancer   10.11.243.228   35.239.188.59   80:30927/TCP   12m
+
+
+#######################################################################################
+
+
+
+Create a ClusterRole to get the list of Pods and read their logs from all namespaces
+
+
+Step 1: Create the "cluster-pod-reader" ServiceAccount 
+
+$ kubectl create serviceaccount cluster-pod-reader
+
+
+Step 2: Get the details of ServiceAccount 
+
+$ kubectl get sa
+
+NAME                 SECRETS   AGE
+cluster-pod-reader   1         2m5s
+default              1         5d11h
+
+
+$ kubectl get secret | egrep 'NAME|cluster-pod-reader'
+
+NAME                             TYPE                                  DATA   AGE
+cluster-pod-reader-token-2r8fh   kubernetes.io/service-account-token   3      3m40s
+
+
+Step 3: Extract the token for NAME|cluster-pod-reader ServiceAccount in a file as below: 
+
+$ kubectl describe secret cluster-pod-reader-token-2r8fh | grep ^token | awk '{print $2}' > ~/cluster-pod-reader-token.txt
+
+
+Step 4: Create ClusterRole and RoleBinding for cluster-pod-reader ServiceAccounts 
+
+$ vim clusterrole-pod-reader.yaml
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: pod-and-pod-logs-reader
+rules:
+- apiGroups: [""]
+  resources: ["pods", "pods/log"]
+  verbs: ["get", "list"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: pod-and-pod-logs-reader
+roleRef:
+  kind: ClusterRole
+  name: pod-and-pod-logs-reader
+  apiGroup: rbac.authorization.k8s.io
+subjects:
+- kind: ServiceAccount
+  namespace: default 
+  name: cluster-pod-reader
+
+---
+  
+:wq (save and exit) 
+
+
+$ kubectl apply -f clusterrole-pod-reader.yaml
+
+$ kubectl get ClusterRole | grep pod-and-pod-logs-reader
+
+$ kubectl describe ClusterRole  pod-and-pod-logs-reader
+Name:         pod-and-pod-logs-reader
+Labels:       <none>
+Annotations:  kubectl.kubernetes.io/last-applied-configuration:
+                {"apiVersion":"rbac.authorization.k8s.io/v1","kind":"ClusterRole","metadata":{"annotations":{},"name":"pod-and-pod-logs-reader"},"rules":[...
+PolicyRule:
+  Resources  Non-Resource URLs  Resource Names  Verbs
+  ---------  -----------------  --------------  -----
+  pods/log   []                 []              [get list]
+  pods       []                 []              [get list]
+  
+  
+$ kubectl get ClusterRoleBinding | grep pod-and-pod-logs-reader
+
+
+$ kubectl describe ClusterRoleBinding  pod-and-pod-logs-reader
+Name:         pod-and-pod-logs-reader
+Labels:       <none>
+Annotations:  kubectl.kubernetes.io/last-applied-configuration:
+                {"apiVersion":"rbac.authorization.k8s.io/v1","kind":"ClusterRoleBinding","metadata":{"annotations":{},"name":"pod-and-pod-logs-reader"},"r...
+Role:
+  Kind:  ClusterRole
+  Name:  pod-and-pod-logs-reader
+Subjects:
+  Kind            Name                Namespace
+  ----            ----                ---------
+  ServiceAccount  cluster-pod-reader  default
+  
+  
+Step 5: Add a Cluster and User credentials (ServiceAccount cluster-pod-reader) to kubectl
+
+sam@vm1:~$ kubectl config set-cluster cluster-pod-reader --server=https://34.66.35.93 --insecure-skip-tls-verify=true
+
+sam@vm1:~$ kubectl config set-credentials cluster-pod-reader --token=$(cat ~/cluster-pod-reader-token.txt) 
+
+sam@vm1:~$ kubectl config set-context cluster-pod-reader --cluster=cluster-pod-reader --user=cluster-pod-reader 
+
+sam@vm1:~$ kubectl config use-context cluster-pod-reader
+
+sam@vm1:~$ kubectl config get-contexts
+
+CURRENT   NAME                 CLUSTER              AUTHINFO             NAMESPACE
+*         cluster-pod-reader   cluster-pod-reader   cluster-pod-reader
+          dev-deployer         dev-deployer         dev-deployer         dev
+          dev-pod-reader       dev-pod-reader       dev-pod-reader       dev
+
+sam@vm1:~$ kubectl  get pod
+NAME                       READY   STATUS    RESTARTS   AGE
+reloader-c56c54c8c-hb7fx   2/2     Running   0          36h
+
+
+sam@vm1:~$ kubectl  get pod -n dev
+
+NAME                         READY   STATUS    RESTARTS   AGE
+dev-nginx-685f7c88b4-8jk9n   1/1     Running   0          50m
+
+
+sam@vm1:~$ kubectl  get pod --all-namespaces
+NAMESPACE     NAME                                                           READY   STATUS    RESTARTS   AGE
+default       reloader-c56c54c8c-hb7fx                                       2/2     Running   0          36h
+dev           dev-nginx-685f7c88b4-8jk9n                                     1/1     Running   0          49m
+kube-system   event-exporter-v0.2.3-f9c896d75-c5ths                          2/2     Running   0          5d12h
+kube-system   fluentd-gcp-scaler-69d79984cb-ssh7h                            1/1     Running   0          5d12h
+kube-system   fluentd-gcp-v3.2.0-82b6z                                       2/2     Running   0          5d12h
+kube-system   fluentd-gcp-v3.2.0-dphq7                                       2/2     Running   0          5d12h
+kube-system   fluentd-gcp-v3.2.0-lsv56                                       2/2     Running   0          5d12h
+kube-system   heapster-v1.6.0-beta.1-bd95558f6-bzdf7                         3/3     Running   0          5d12h
+kube-system   kube-dns-autoscaler-76fcd5f658-mgj7d                           1/1     Running   0          5d12h
+kube-system   kube-dns-b46cc9485-48gxn                                       4/4     Running   0          5d12h
+kube-system   kube-dns-b46cc9485-c76nc                                       4/4     Running   0          5d12h
+kube-system   kube-proxy-gke-standard-cluster-1-default-pool-31d796d7-9z1s   1/1     Running   0          5d12h
+kube-system   kube-proxy-gke-standard-cluster-1-default-pool-31d796d7-gxqr   1/1     Running   0          5d12h
+kube-system   kube-proxy-gke-standard-cluster-1-default-pool-31d796d7-l5th   1/1     Running   0          5d12h
+kube-system   l7-default-backend-6f8697844f-8nkt5                            1/1     Running   0          5d12h
+kube-system   metrics-server-v0.3.1-5b4d6d8d98-sd7dk                         2/2     Running   0          5d12h
+kube-system   prometheus-to-sd-pxh4l                                         1/1     Running   0          5d12h
+kube-system   prometheus-to-sd-qx6hx                                         1/1     Running   0          5d12h
+kube-system   prometheus-to-sd-xgxhm                                         1/1     Running   0          5d12h
+
+
+Try to list other resources like svc, ConfigMap, Deployments etc. 
+
+sam@vm1:~$ kubectl  get svc
+
+Error from server (Forbidden): services is forbidden: User "system:serviceaccount:default:cluster-pod-reader" cannot list resource "services" in API group "" in the namespace "default"
+
+sam@vm1:~$ kubectl  get cm
+
+Error from server (Forbidden): configmaps is forbidden: User "system:serviceaccount:default:cluster-pod-reader" cannot list resource "configmaps" in API group "" in the namespace "default"
+
+sam@vm1:~$ kubectl  get deploy
+
+Error from server (Forbidden): deployments.extensions is forbidden: User "system:serviceaccount:default:cluster-pod-reader" cannot list resource "deployments" in API group "extensions" in the namespace "default"
+
+
+sam@vm1:~$ kubectl  exec -it dev-nginx-685f7c88b4-8jk9n /bin/bash -n dev
+
+Error from server (Forbidden): pods "dev-nginx-685f7c88b4-8jk9n" is forbidden: User "system:serviceaccount:default:cluster-pod-reader" cannot create resource "pods/exec" in API group "" in the namespace "dev"
 
 
 Congratulations, you have successfully configured RBAC on Kubernetes Cluster.
