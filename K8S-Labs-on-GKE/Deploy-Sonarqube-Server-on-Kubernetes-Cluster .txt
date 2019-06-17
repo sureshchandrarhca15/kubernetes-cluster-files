@@ -1,0 +1,383 @@
+Deploy Sonarqube Server on Kubernetes Cluster 
+########################
+
+
+Step 1: Go to the Compute Engine VM and create a new directory in filestore mount 
+
+[root@instance-1 ~]$ mkdir -p /mnt/sonarqube/data
+[root@instance-1 ~]$ mkdir -p /mnt/sonarqube/extensions
+[root@instance-1 ~]$ mkdir -p /mnt/sonarqube/postgres
+[root@instance-1 ~]$ sudo chmod -R a+rwx /mnt/sonarqube/
+
+
+
+Step 2: Create PersistentVolume and PersistentVolumeClaims for store SonarQube extensions && data and Postgres. 
+
+[root@master1 ~]# mkdir sonarqube_project && cd sonarqube_project
+
+[root@master1 sonarqube_project]# vim sonar-data-pv.yaml
+
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: sonarqube-data
+spec:
+  capacity:
+    storage: 5Gi
+  storageClassName: standard
+  accessModes:
+    - ReadWriteMany
+  nfs:
+    server: 10.231.23.218
+    path: /volume1/sonarqube/data
+
+:wq (save and exit) 
+
+[root@master1 sonarqube_project]# kubectl apply -f sonar-data-pv.yaml
+
+NAME             CAPACITY   ACCESS MODES   RECLAIM POLICY   STATUS      CLAIM                 STORAGECLASS   REASON   AGE
+pv001            5Gi        RWX            Retain           Bound       default/jenkins-pvc   standard                26m
+sonarqube-data   5Gi        RWX            Retain           Available                         standard                5s
+
+
+[root@master1 sonarqube_project]# vim sonar-data-pvc.yaml
+
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: sonarqube-data-pvc
+  labels:
+    app: sonarqube-data
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 5Gi
+
+
+:wq (save and exit) 
+
+[root@master1 sonarqube_project]# kubectl apply -f sonar-data-pvc.yaml
+
+
+[root@master1 sonarqube_project]# kubectl get pvc
+
+NAME                 STATUS   VOLUME           CAPACITY   ACCESS MODES   STORAGECLASS   AGE
+jenkins-pvc          Bound    pv001            5Gi        RWX            standard       27m
+sonarqube-data-pvc   Bound    sonarqube-data   5Gi        RWX            standard       8s
+
+
+[root@master1 sonarqube_project]# vim sonar-extensions-pv.yaml
+
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: sonarqube-extensions
+spec:
+  capacity:
+    storage: 5Gi
+  storageClassName: standard
+  accessModes:
+    - ReadWriteMany
+  nfs:
+    server: 10.231.23.218
+    path: /volume1/sonarqube/extensions
+	
+
+:wq (save and exit) 
+
+[root@master1 sonarqube_project]# kubectl apply -f sonar-extensions-pv.yaml
+
+[root@master1 sonarqube_project]# kubectl get pv
+
+NAME                   CAPACITY   ACCESS MODES   RECLAIM POLICY   STATUS      CLAIM                        STORAGECLASS   REASON   AGE
+pv001                  5Gi        RWX            Retain           Bound       default/jenkins-pvc          standard                31m
+sonarqube-data         5Gi        RWX            Retain           Bound       default/sonarqube-data-pvc   standard                4m59s
+sonarqube-extensions   5Gi        RWX            Retain           Available                                standard                6s
+
+
+
+[root@master1 sonarqube_project]# vim sonar-extensions-pvc.yaml
+
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: sonarqube-extensions-pvc
+  labels:
+    app: sonarqube-extensions
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 5Gi
+
+:wq (save and exit) 
+
+[root@master1 sonarqube_project]# kubectl apply -f sonar-extensions-pvc.yaml
+
+[root@master1 sonarqube_project]# kubectl get pvc
+
+NAME                       STATUS   VOLUME                 CAPACITY   ACCESS MODES   STORAGECLASS   AGE
+jenkins-pvc                Bound    pv001                  5Gi        RWX            standard       32m
+sonarqube-data-pvc         Bound    sonarqube-data         5Gi        RWX            standard       5m
+sonarqube-extensions-pvc   Bound    sonarqube-extensions   5Gi        RWX            standard       5s
+
+
+[root@master1 sonarqube_project]# vim sonar-postgres-pv.yaml
+
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: sonarqube-postgres
+spec:
+  capacity:
+    storage: 5Gi
+  storageClassName: standard
+  accessModes:
+    - ReadWriteMany
+  nfs:
+    server: 10.231.23.218
+    path: /volume1/sonarqube/postgres
+
+:wq (save and exit) 
+
+
+[root@master1 sonarqube_project]# kubectl apply -f sonar-postgres-pv.yaml
+
+[root@master1 sonarqube_project]# kubectl get pv
+
+NAME                   CAPACITY   ACCESS MODES   RECLAIM POLICY   STATUS      CLAIM                              STORAGECLASS   REASON   AGE
+pv001                  5Gi        RWX            Retain           Bound       default/jenkins-pvc                standard                38m
+sonarqube-data         5Gi        RWX            Retain           Bound       default/sonarqube-data-pvc         standard                12m
+sonarqube-extensions   5Gi        RWX            Retain           Bound       default/sonarqube-extensions-pvc   standard                7m8s
+sonarqube-postgres     5Gi        RWX            Retain           Available                                      standard                6s
+
+[root@master1 sonarqube_project]# vim sonar-postgres-pvc.yaml
+
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: sonarqube-postgres-pvc
+  labels:
+    app: sonarqube-postgres
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 5Gi
+
+:wq (save and exit) 
+
+[root@master1 sonarqube_project]# kubectl apply -f sonar-postgres-pvc.yaml
+
+[root@master1 sonarqube_project]# kubectl get pvc
+
+NAME                       STATUS   VOLUME                 CAPACITY   ACCESS MODES   STORAGECLASS   AGE
+jenkins-pvc                Bound    pv001                  5Gi        RWX            standard       39m
+sonarqube-data-pvc         Bound    sonarqube-data         5Gi        RWX            standard       11m
+sonarqube-extensions-pvc   Bound    sonarqube-extensions   5Gi        RWX            standard       6m55s
+sonarqube-postgres-pvc     Bound    sonarqube-postgres     5Gi        RWX            standard       14s
+
+[root@master1 sonarqube_project]# kubectl get pv
+
+NAME                   CAPACITY   ACCESS MODES   RECLAIM POLICY   STATUS   CLAIM                              STORAGECLASS   REASON   AGE
+pv001                  5Gi        RWX            Retain           Bound    default/jenkins-pvc                standard                40m
+sonarqube-data         5Gi        RWX            Retain           Bound    default/sonarqube-data-pvc         standard                13m
+sonarqube-extensions   5Gi        RWX            Retain           Bound    default/sonarqube-extensions-pvc   standard                8m55s
+sonarqube-postgres     5Gi        RWX            Retain           Bound    default/sonarqube-postgres-pvc     standard                113s
+
+
+Step 3: Create secret for postgres database
+
+[root@master1 sonarqube_project]# kubectl create secret generic postgres-pwd --from-literal=password=CodeRise_Pass
+
+[root@master1 sonarqube_project]# kubectl get secret
+
+NAME                  TYPE                                  DATA   AGE
+default-token-bsv2z   kubernetes.io/service-account-token   3      3h16m
+gcr-secret            kubernetes.io/dockerconfigjson        1      139m
+postgres-pwd          Opaque                                1      14s
+
+
+Step 4: Create Postgres Deployment and Service Spec files 
+
+[root@master1 sonarqube_project]# vim sonar-postgres-deployment.yaml
+
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  name: sonar-postgres
+spec:
+  replicas: 1
+  template:
+    metadata:
+      name: sonar-postgres
+      labels:
+        name: sonar-postgres
+    spec:
+      containers:
+        - image: postgres:latest
+          name: sonar-postgres
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-pwd
+                  key: password
+            - name: POSTGRES_USER
+              value: sonar
+          ports:
+            - containerPort: 5432
+              name: postgresport
+          volumeMounts:
+            # This name must match the volumes.name below.
+            - name: data-disk
+              mountPath: /var/lib/postgresql/data
+      volumes:
+        - name: data-disk
+          persistentVolumeClaim:
+            claimName: sonarqube-postgres-pvc
+
+:wq (save and exit) 
+
+[root@master1 sonarqube_project]# kubectl apply -f sonar-postgres-deployment.yaml
+
+[root@master1 sonarqube_project]# kubectl get pod
+
+NAME                              READY   STATUS    RESTARTS   AGE
+jenkins-57d44c9dd5-sxfjh          1/1     Running   0          44m
+sonar-postgres-69d5cc8d48-87c5g   1/1     Running   0          22s
+
+[root@master1 sonarqube_project]# vim sonar-postgres-service.yaml
+
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    name: sonar-postgres
+  name: sonar-postgres
+spec:
+  ports:
+    - port: 5432
+  selector:
+    name: sonar-postgres
+
+:wq (save and exit) 
+
+
+[root@master1 sonarqube_project]# kubectl apply -f sonar-postgres-service.yaml
+
+[root@master1 sonarqube_project]# kubectl get svc
+
+NAME             TYPE           CLUSTER-IP      EXTERNAL-IP     PORT(S)                          AGE
+jenkins          LoadBalancer   10.39.240.107   35.230.39.234   8080:31792/TCP,50000:32166/TCP   137m
+kubernetes       ClusterIP      10.39.240.1     <none>          443/TCP                          3h22m
+sonar-postgres   ClusterIP      10.39.244.97    <none>          5432/TCP                         5s
+
+
+Step 5: Create SonarQube Deployment and Service Spec files
+
+[root@master1 sonarqube_project]# vim sonarqube-deployment.yaml
+
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  labels:
+    app: sonarqube
+  name: sonarqube
+spec:
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: sonarqube
+    spec:
+      containers:
+        - name: sonarqube
+          image: sonarqube:7.1
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1024Mi
+            limits:
+              cpu: 2000m
+              memory: 2048Mi
+          volumeMounts:
+          - mountPath: "/opt/sonarqube/data/"
+            name: sonar-data
+          - mountPath: "/opt/sonarqube/extensions/"
+            name: sonar-extensions
+          env:
+          - name: "SONARQUBE_JDBC_URL"
+            value: "jdbc:postgresql://sonar-postgres:5432/sonar"
+          - name: "SONARQUBE_JDBC_PASSWORD"
+            valueFrom:
+              secretKeyRef:
+                name: postgres-pwd
+                key: password
+          ports:
+          - containerPort: 9000
+            protocol: TCP
+      volumes:
+      - name: sonar-data
+        persistentVolumeClaim:
+          claimName: sonarqube-data-pvc
+      - name: sonar-extensions
+        persistentVolumeClaim:
+          claimName: sonarqube-extensions-pvc
+
+:wq (save and exit) 
+
+
+[root@master1 sonarqube_project]# kubectl apply -f sonarqube-deployment.yaml
+
+[root@master1 sonarqube_project]# kubectl get pod
+
+NAME                              READY   STATUS    RESTARTS   AGE
+jenkins-57d44c9dd5-sxfjh          1/1     Running   0          48m
+sonar-postgres-69d5cc8d48-87c5g   1/1     Running   0          3m48s
+sonarqube-6bd5c5999b-5xgtq        1/1     Running   0          49s
+
+[root@master1 sonarqube_project]# vim sonarqube-service.yaml
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: sonarqube
+  labels:
+    app: sonarqube
+spec:
+  type: LoadBalancer
+  ports:
+    - name: sonarport
+      port: 8082
+      targetPort: 9000
+  selector:
+    app: sonarqube
+
+:wq (save and exit) 
+
+
+
+[root@master1 sonarqube_project]# kubectl apply -f sonarqube-service.yaml
+
+[root@master1 sonarqube_project]# kubectl get svc
+
+NAME             TYPE           CLUSTER-IP      EXTERNAL-IP     PORT(S)                          AGE
+jenkins          LoadBalancer   10.39.240.107   35.230.39.234   8080:31792/TCP,50000:32166/TCP   144m
+kubernetes       ClusterIP      10.39.240.1     <none>          443/TCP                          3h28m
+sonar-postgres   ClusterIP      10.39.244.97    <none>          5432/TCP                         6m22s
+sonarqube        LoadBalancer   10.39.252.127   34.83.210.131   8082:31451/TCP                   33s
+
+Step 6: Now Open Web Browser and point to LoadBalancer IP Address and 9000 Port to access SonarQube Dashboard: 
+
+URL: http://34.83.210.131:8082
+
+Username: admin
+Password: admin 
+
+
+##########################################################################################################################

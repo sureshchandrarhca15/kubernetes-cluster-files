@@ -1,0 +1,132 @@
+Deploy Tomcat on Kubernetes Cluster 
+###################################
+
+Step 1: Create a directory on Compute Engine filestore for Persistent Storage of Tomcat. 
+
+[root@instance-1 ~]# mkdir -p /mnt/tomcat
+[root@instance-1 ~]# setfacl -m o:rwx /mnt/tomcat/
+[root@instance-1 ~]# setfacl -m d:o:rwx /mnt/tomcat/
+
+
+Step 2: Create PersistentVolume and PersistentVolumeClaims to store Nexus3 data 
+
+[root@master1 ~]# mkdir tomcat_project && cd tomcat_project
+
+[root@master1 tomcat_project]# vim tomcat-pv.yaml
+
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: tomcat
+spec:
+  capacity:
+    storage: 5Gi
+  storageClassName: standard
+  accessModes:
+    - ReadWriteMany
+  nfs:
+    server: 10.231.23.218
+    path: /volume1/tomcat
+	
+	
+:wq (save and exit) 
+
+[root@master1 tomcat_project]# kubectl apply -f tomcat-pv.yaml
+
+
+[root@master1 tomcat_project]# kubectl get pv 
+NAME                   CAPACITY   ACCESS MODES   RECLAIM POLICY   STATUS   CLAIM                              STORAGECLASS   REASON   AGE
+nexus3                 5Gi        RWX            Retain           Bound    default/nexus3-pvc                 standard                126m
+pv001                  5Gi        RWX            Retain           Bound    default/jenkins-pvc                standard                3h28m
+sonarqube-data         5Gi        RWX            Retain           Bound    default/sonarqube-data-pvc         standard                3h1m
+sonarqube-extensions   5Gi        RWX            Retain           Bound    default/sonarqube-extensions-pvc   standard                176m
+sonarqube-postgres     5Gi        RWX            Retain           Bound    default/sonarqube-postgres-pvc     standard                169m
+tomcat                 5Gi        RWX            Retain           Bound    default/tomcat-pvc                 standard                3m24s
+
+
+[root@master1 tomcat_project]# vim tomcat-pvc.yaml
+
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: tomcat-pvc
+  labels:
+    app: tomcat
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 5Gi
+
+:wq (save and exit) 
+
+[root@master1 tomcat_project]# kubectl get pvc
+
+NAME                       STATUS   VOLUME                 CAPACITY   ACCESS MODES   STORAGECLASS   AGE
+jenkins-pvc                Bound    pv001                  5Gi        RWX            standard       3h28m
+nexus3-pvc                 Bound    nexus3                 5Gi        RWX            standard       125m
+sonarqube-data-pvc         Bound    sonarqube-data         5Gi        RWX            standard       3h1m
+sonarqube-extensions-pvc   Bound    sonarqube-extensions   5Gi        RWX            standard       176m
+sonarqube-postgres-pvc     Bound    sonarqube-postgres     5Gi        RWX            standard       169m
+tomcat-pvc                 Bound    tomcat                 5Gi        RWX            standard       89s
+
+
+[root@master1 tomcat_project]# vim tomcat-deployment.yaml
+
+
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  name: tomcat
+spec:
+  replicas: 2
+  template:
+    metadata:
+      labels:
+        app: tomcat
+    spec:
+      containers:
+      - name: tomcat-container
+        image: tomcat:latest
+        ports:
+        - containerPort: 8080
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 8080
+			
+:wq (save and exit) 
+
+
+[root@master1 tomcat_project]# vim tomcat-service.yaml
+
+kind: Service
+apiVersion: v1
+metadata:
+  name: tomcat-service
+  labels:
+    app: tomcat
+spec:
+  type: LoadBalancer
+  selector:
+    app: tomcat
+  ports:
+    - port: 80
+      targetPort: 8080
+
+:wq (save and exit) 
+
+
+[root@master1 tomcat_project]# kubectl apply -f tomcat-service.yaml
+
+[root@master1 tomcat_project]# kubectl get svc
+NAME             TYPE           CLUSTER-IP      EXTERNAL-IP      PORT(S)                          AGE
+jenkins          LoadBalancer   10.39.240.107   35.230.39.234    8080:31792/TCP,50000:32166/TCP   5h18m
+kubernetes       ClusterIP      10.39.240.1     <none>           443/TCP                          6h22m
+nexus-service    LoadBalancer   10.39.245.118   34.83.196.108    8081:31080/TCP                   79m
+sonar-postgres   ClusterIP      10.39.244.97    <none>           5432/TCP                         3h
+sonarqube        LoadBalancer   10.39.252.127   34.83.210.131    8082:31865/TCP                   174m
+tomcat-service   LoadBalancer   10.39.245.169   35.203.173.197   80:32476/TCP                     52s
+
+#####################################################################################################################

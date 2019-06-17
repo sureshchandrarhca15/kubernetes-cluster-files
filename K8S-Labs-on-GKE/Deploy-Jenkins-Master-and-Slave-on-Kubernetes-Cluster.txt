@@ -1,0 +1,528 @@
+Deploy Jenkins Master and Slave on Kubernetes Cluster
+######################################################
+
+
+Step 1: Create a filestore to provide Persistent Storage for Kubernetes Cluster 
+Step 2: Create a Kubernetes Cluster 
+Step 3: Create a VM for Docker Image build and upload to GCR. 
+Step 4: Mount filestore to the VM and do the below task: 
+		
+		1. Create directories named "jenkins" 
+		2. give full permissions for other. 
+		
+Step 5: Create a PV on Kubernetes Cluster by using filestore volume
+
+[root@master1 ~]# mkdir jenkins_project && cd jenkins_project
+
+[root@master jenkins_project]# vim jenkins-pv.yml
+
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: pv001
+spec:
+  capacity:
+    storage: 5Gi
+  storageClassName: standard
+  accessModes:
+    - ReadWriteMany
+  nfs:
+    server: 10.231.23.218
+    path: /volume1/jenkins
+
+
+:wq (save and exit) 
+
+[root@master1 jenkins_project]# kubectl apply -f jenkins-pv.yml
+
+
+[root@master1 jenkins_project]# kubectl get pv
+
+NAME    CAPACITY   ACCESS MODES   RECLAIM POLICY   STATUS   CLAIM                 STORAGECLASS   REASON   AGE
+pv001   5Gi        RWX            Retain           Bound    default/jenkins-pvc   standard                4m21s
+
+
+Step 6: Create PVC for Jenkins 
+
+[root@master1 jenkins_project]# vim jenkins-pvc.yml
+
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: jenkins-pvc
+  labels:
+    app: jenkins
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 5Gi
+
+
+:wq (save and exit) 
+
+
+[root@master1 jenkins_project]# kubectl apply -f jenkins-pvc.yml
+
+[root@master1 jenkins_project]# kubectl get pvc
+
+NAME          STATUS   VOLUME   CAPACITY   ACCESS MODES   STORAGECLASS   AGE
+jenkins-pvc   Bound    pv001    5Gi        RWX            standard       4m19s
+
+[root@master1 jenkins_project]# kubectl get pv
+
+NAME    CAPACITY   ACCESS MODES   RECLAIM POLICY   STATUS   CLAIM                 STORAGECLASS   REASON   AGE
+pv001   5Gi        RWX            Retain           Bound    default/jenkins-pvc   standard                5m6s
+
+
+Step 7: Now go to the Compute Engine Instance and Create a Dockerfile to build a custom Jenkins Image.  
+
+[root@instance1 ~]# mkdir jenkins_project && cd jenkins_project
+
+[root@instance1 jenkins_project]# vim Dockerfile
+
+from jenkinsci/jenkins
+
+#Disable Inital Setup Wizard
+ENV JAVA_OPTS="-Djenkins.install.runSetupWizard=false"
+
+#Copy security.groovy Script
+
+COPY security.groovy /usr/share/jenkins/ref/init.groovy.d/security.groovy
+
+# Copy plugins.txt file
+COPY plugins.txt /usr/share/jenkins/ref/plugins.txt
+
+#Install Plugins
+
+RUN /usr/local/bin/install-plugins.sh < /usr/share/jenkins/ref/plugins.txt
+
+# install Maven
+USER root
+RUN apt-get update && apt-get install -y maven
+USER jenkins
+
+
+:wq (save and exit) 
+
+
+Step 8: Create a groovy script to set admin user and password for Jenkins. 
+
+[root@instance1 jenkins_project]# vim security.groovy
+
+#!groovy
+ 
+import jenkins.model.*
+import hudson.security.*
+import jenkins.security.s2m.AdminWhitelistRule
+ 
+def instance = Jenkins.getInstance()
+ 
+def hudsonRealm = new HudsonPrivateSecurityRealm(false)
+hudsonRealm.createAccount("admin", "admin")
+instance.setSecurityRealm(hudsonRealm)
+ 
+def strategy = new FullControlOnceLoggedInAuthorizationStrategy()
+instance.setAuthorizationStrategy(strategy)
+instance.save()
+ 
+Jenkins.instance.getInjector().getInstance(AdminWhitelistRule.class).setMasterKillSwitch(false)
+
+ 
+:wq (save and exit) 
+ 
+ 
+Step 9: Create a plugins.txt file and mention the plugins which you want to install in Jenkins. 
+ 
+ 
+[root@instance1 jenkins_project]# vim plugins.txt
+
+ace-editor:latest
+ant:latest
+antisamy-markup-formatter:latest
+authentication-tokens:latest
+blueocean:latest 
+blueocean-autofavorite:latest
+blueocean-commons:latest
+blueocean-config:latest 
+blueocean-dashboard:latest
+blueocean-display-url:latest
+blueocean-github-pipeline:latest
+blueocean-git-pipeline:latest 
+blueocean-i18n:latest 
+blueocean-events:latest 
+blueocean-jwt:latest 
+blueocean-personalization:latest
+blueocean-pipeline-api-impl:latest
+blueocean-rest:latest
+blueocean-rest-impl:latest
+blueocean-web:latest
+bouncycastle-api:latest
+branch-api:latest
+build-timeout:latest
+cloudbees-folder:latest
+credentials:latest
+credentials-binding:latest
+display-url-api:latest
+docker-commons:latest
+docker-workflow:latest
+durable-task:latest
+email-ext:latest
+external-monitor-job:latest
+favorite:latest
+git-changelog:latest
+git:latest
+git-client:latest
+git-server:latest
+ghprb:latest
+github:latest
+github-api:latest
+github-branch-source:latest
+github-issues:latest
+github-oauth:latest
+github-organization-folder:latest
+github-pullrequest:latest
+github-pr-coverage-status:latest
+gitlab-merge-request-jenkins:latest
+gitlab-oauth:latest
+gitlab-plugin:latest
+google-login:latest
+gradle:latest
+gravatar:latest
+handlebars:latest
+icon-shim:latest
+jackson2-api:latest
+javadoc:latest
+jquery-detached:latest
+junit:latest
+kerberos-sso:latest
+ldap:latest
+maven-plugin:latest
+mailer:latest
+mapdb-api:latest
+matrix-auth:latest
+matrix-project:latest
+mercurial:latest
+metrics:latest
+momentjs:latest
+oic-auth:latest
+oauth-credentials:latest
+openid:latest
+openid4java:latest
+openshift-login:latest
+pam-auth:latest
+pipeline-build-step:latest
+pipeline-graph-analysis:latest
+pipeline-input-step:latest
+pipeline-milestone-step:latest
+pipeline-model-api:latest
+pipeline-model-declarative-agent:latest
+pipeline-model-definition:latest
+pipeline-githubnotify-step:latest
+pipeline-github-lib:latest
+pipeline-rest-api:latest
+pipeline-stage-step:latest
+pipeline-stage-tags-metadata:latest
+pipeline-stage-view:latest
+pipeline-utility-steps:latest
+plain-credentials:latest
+pubsub-light:latest
+scm-api:latest
+script-security:latest
+sse-gateway:latest
+ssh-agent:latest
+ssh-credentials:latest
+ssh-slaves:latest
+structs:latest
+subversion:latest
+timestamper:latest
+token-macro:latest
+url-auth-sso:latest
+variant:latest
+resource-disposer:latest
+windows-slaves:latest
+workflow-aggregator:latest
+workflow-api:latest
+workflow-basic-steps:latest
+workflow-cps:latest
+workflow-cps-global-lib:latest
+workflow-durable-task-step:latest
+workflow-job:latest
+workflow-multibranch:latest
+workflow-scm-step:latest
+workflow-step-api:latest
+workflow-support:latest
+ws-cleanup:latest
+slack:latest
+htmlpublisher:latest
+greenballs:latest
+simple-theme-plugin:latest
+kubernetes:latest
+ansicolor:latest
+sonar:latest
+sonar-quality-gates:latest
+nexus-artifact-uploader:latest
+nexus-jenkins-plugin:latest
+parameterized-trigger:latest
+
+
+
+:wq (save and exit) 
+
+
+Step 10: Build the Docker Image for Jenkins and then upload it to Docker Registry. 
+
+[root@instance1 jenkins_project]# docker build -t my-jenkinsci-image:v1.0 .
+
+
+[root@instance1 jenkins_project]# docker images
+REPOSITORY                 	  TAG                 IMAGE ID            CREATED             SIZE
+my-jenkinsci-image            v1.0                eed4806b59d4        3 minutes ago       886 MB
+docker.io/jenkinsci/jenkins   2.60.1              4df8bbf4d1e8        14 months ago       810 MB
+
+
+
+[root@instance1 jenkins_project]# gcloud auth configure-docker
+[root@instance1 jenkins_project]# docker login -u _json_key -p "$(cat json.key)" https://gcr.io
+
+
+NOTE: Please note that, You should have "json.key" file to login in GCR 
+
+
+Tag the Image with "gcr.io/PROJECT_ID/my-jenkinsci-image:v1.0" 
+
+[root@instance1 jenkins_project]# docker tag my-jenkinsci-image:v1.0 gcr.io/focus-ensign-240806/my-jenkinsci-image:v1.0
+
+
+[root@instance1 jenkins_project]# docker images
+REPOSITORY                                      TAG                 IMAGE ID            CREATED             SIZE
+gcr.io/focus-ensign-240806/my-jenkinsci-image   v1.0                6e8132522690        4 minutes ago       906 MB
+my-jenkinsci-image                              v1.0                6e8132522690        4 minutes ago       906 MB
+docker.io/jenkinsci/jenkins                     latest              b589aefe29ff        6 months ago        703 MB
+
+Upload this Image into GCR 
+
+[root@instance1 jenkins_project]# docker push docker push gcr.io/focus-ensign-240806/my-jenkinsci-image
+
+[root@instance1 jenkins_project]# gcloud container images list
+
+[root@instance1 jenkins_project]# gcloud container images list-tags gcr.io/focus-ensign-240806/my-jenkinsci-image
+
+
+
+Step 11: Create a secret to store GCR credentials to pull Images from it. 
+
+[root@master1 jenkins_project]# kubectl create secret docker-registry gcr-secret --docker-server=gcr.io --docker-username=_json_key --docker-password="$( cat ~/my-first-project-6bf572eac4fd.json)"
+
+
+
+Step 12: Create Jenkins Master Deployment spec file on Kubernetes Master:  
+
+[root@master1 jenkins_project]# vim jenkins-deployment.yaml
+
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  name: jenkins
+spec:
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: jenkins
+    spec:
+      containers:
+        - name: jenkins
+          image: sureshchandrarhca15/my-jenkinsci-image:v1.0
+          env:
+            - name: JAVA_OPTS
+              value: -Djenkins.install.runSetupWizard=false
+          ports:
+            - name: http-port
+              containerPort: 8080
+            - name: jnlp-port
+              containerPort: 50000
+          volumeMounts:
+            - name: jenkins-home
+              mountPath: /var/jenkins_home
+      volumes:
+        - name: jenkins-home
+          persistentVolumeClaim:
+		    claimName: jenkins-pvc
+      imagePullSecrets:
+	  - name: gcr-secret
+
+
+:wq (save and exit) 
+
+
+Run the below command to deploy Jenkins Master 
+
+[root@master1 jenkins_project]# kubectl apply -f jenkins-deployment.yaml
+
+[root@master1 jenkins_project]# kubectl get pod
+
+NAME                       READY   STATUS    RESTARTS   AGE
+jenkins-57d44c9dd5-8ptjt   1/1     Running   0          45s
+
+[root@master1 jenkins_project]# kubectl get deployment
+
+NAME      DESIRED   CURRENT   UP-TO-DATE   AVAILABLE   AGE
+jenkins   1         1         1            1           67s
+
+
+
+Step 13: Create the Jenkins service yaml file:
+
+[root@master1 jenkins_project]# vim jenkins-service.yaml
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: jenkins
+spec:
+  type: NodePort
+  ports:
+    - name: management
+      port: 8080
+      targetPort: 8080
+    - name: jnlp
+      port: 50000
+      targetPort: 50000
+  selector:
+    app: jenkins
+
+	
+:wq (save and exit) 
+
+
+
+Run the below command to create Jenkins Service: 
+
+[root@master1 jenkins_project]# kubectl create -f jenkins-service.yaml
+
+
+[root@master1 jenkins_project]#  kubectl  get svc
+
+NAME         TYPE           CLUSTER-IP      EXTERNAL-IP     PORT(S)                          AGE
+jenkins      LoadBalancer   10.39.240.107   35.230.39.234   8080:31792/TCP,50000:32166/TCP   44s
+kubernetes   ClusterIP      10.39.240.1     <none>          443/TCP                          65m
+
+Now Open Web Browser and point to the following URL to access Jenkins Dashboard: 
+
+http://35.230.39.234:8080
+
+
+Username: admin
+Password: admin 
+
+
+Configure Jenkins Slaves 
+#########################
+
+Step 1: 
+########
+Now it’s time to configure Jenkins slaves. As you might remember, we installed the Kubernetes plugin using the master dockerfile so we don’t need to install anything separately and the required plugin should be already there.
+
+In order to configure the Jenkins slaves. We need to know the URL of the Kubernetes master and the internal cluster URL of the Jenkins pod. You can get the Kubernetes master URL by this specified command:
+
+[root@master1 jenkins_project]# kubectl cluster-info
+
+Kubernetes master is running at https://35.247.106.248
+GLBCDefaultBackend is running at https://35.247.106.248/api/v1/namespaces/kube-system/services/default-http-backend:http/proxy
+Heapster is running at https://35.247.106.248/api/v1/namespaces/kube-system/services/heapster/proxy
+KubeDNS is running at https://35.247.106.248/api/v1/namespaces/kube-system/services/kube-dns:dns/proxy
+Metrics-server is running at https://35.247.106.248/api/v1/namespaces/kube-system/services/https:metrics-server:/proxy
+
+[root@master1 jenkins_project]# kubectl get svc 
+
+NAME         TYPE           CLUSTER-IP      EXTERNAL-IP     PORT(S)                          AGE
+jenkins      LoadBalancer   10.39.240.107   35.230.39.234   8080:31792/TCP,50000:32166/TCP   3m13s
+kubernetes   ClusterIP      10.39.240.1     <none>          443/TCP                          67m
+
+
+
+Step 2: 
+########
+Now, we are ready to fill in the Kubernetes plugin configuration. 
+
+Open the Jenkins UI and navigate to “Manage Jenkins -> Configure System -> Cloud -> Add a new cloud -> Kubernetes” 
+
+and fill in the ‘Kubernetes URL’ and ‘Jenkins URL’ appropriately, by using the values which we have just collected in the previous step:
+
+Name					=	kubernetes
+
+Kubernetes URL			= 	https://35.247.106.248
+
+Kubernetes Namespace	=	default
+
+Credentials				= 	Add the Credentials and upload /etc/kubernetes/admin.conf file
+
+Jenkins URL				= 	http://35.230.39.234:8080
+
+Jenkins tunnel			=	35.230.39.234:50000
+
+
+Click on Add Pod Template -> Kubernetes Pod Template
+
+Name					=	jenkins-slave
+
+Namespace				= 	default 
+
+Labels					=	jenkins-slave
+
+Usage					=	Use this node as much as possible
+
+
+Containers -> Add Container -> Container Template
+
+Name							=	jenkins-slave
+Docker image					=	jenkinsci/jnlp-slave
+Working directory				=	/home/jenkins
+Command to run					=	Delete the value here
+Arguments to pass to the command =  Delete the value here
+
+
+Click on apply and save. 
+
+
+
+Step 3: 
+########
+Testing Dynamic Build Jobs:
+
+Now that our configuration is complete, we can create some build jobs to ensure that Jenkins can scale on top of Kubernetes. We will create five build jobs for each of our Jenkins agents.
+
+
+On the main Jenkins page, click New Item on the left side. Enter a name for the first build of your first agent. Select Freestyle project and click the OK button.
+
+Scroll down to the Build Environment section and check Color ANSI Console Output.
+
+Color ANSI Console Output
+		ANSI color map		=	xterm 
+		
+
+In the Build section, click Add build step and select Execute shell. Paste the following script in the text box that appears:
+
+#!/bin/bash
+
+RED='\033[0;31m'
+NC='\033[0m'
+sleep 60
+echo -e "${RED}The Build Job Successfully Executed ${NC}"
+
+
+
+Click the Save button when you are finished.
+
+Create another four jobs by clicking New Item, filling out a new name.
+
+Step 4: 
+########
+Now, go to the home screen and start all the five jobs you just created by clicking on the icon on the far right side of each row. 
+As soon as you start them, they will be queued for execution as indicated by the Build Queue section. 
+
+
+
+####################################################################################################################################

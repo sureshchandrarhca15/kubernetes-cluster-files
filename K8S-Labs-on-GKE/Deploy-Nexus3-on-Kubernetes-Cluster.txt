@@ -1,0 +1,164 @@
+Deploy Nexus3 on Kubernetes Cluster 
+###################################
+
+Step 1: Create a directory on Compute Engine filestore for Persistent Storage of nexus. 
+
+[root@instance-1 ~]# mkdir -p /mnt/nexus3
+[root@instance-1 ~]# chmod -R o+rwx /mnt/nexus3
+
+
+Step 2: Create PersistentVolume and PersistentVolumeClaims to store Nexus3 data 
+
+[root@master1 ~]# mkdir nexus3_project && cd nexus3_project
+
+[root@master1 nexus3_project]# vim nexus3-pv.yaml
+
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: nexus3
+spec:
+  capacity:
+    storage: 5Gi
+  storageClassName: standard
+  accessModes:
+    - ReadWriteMany
+  nfs:
+    server: 10.231.23.218
+    path: /volume1/nexus3
+	
+	
+:wq (save and exit) 
+
+[root@master1 nexus3_project]# kubectl apply -f nexus3-pv.yaml
+
+
+[root@master1 nexus3_project]# kubectl get pv | egrep 'NAME|nexus3'
+
+NAME                   CAPACITY   ACCESS MODES   RECLAIM POLICY   STATUS      CLAIM                              STORAGECLASS   REASON   AGE
+nexus3                 5Gi        RWX            Retain           Available                                      standard                24s
+
+
+[root@master1 nexus3_project]# vim nexus3-pvc.yaml
+
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: nexus3-pvc
+  labels:
+    app: nexus3
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 5Gi
+
+
+:wq (save and exit) 
+
+[root@master1 nexus3_project]# kubectl apply -f nexus3-pvc.yaml
+
+[root@master1 nexus3_project]# kubectl get pvc | egrep 'NAME|nexus3'
+
+NAME                       STATUS   VOLUME                 CAPACITY   ACCESS MODES   STORAGECLASS   AGE
+nexus3-pvc                 Bound    nexus3                 5Gi        RWX            standard       12s
+
+
+[root@master1 nexus3_project]# kubectl get pv | egrep 'NAME|nexus3'
+
+NAME                   CAPACITY   ACCESS MODES   RECLAIM POLICY   STATUS   CLAIM                              STORAGECLASS   REASON   AGE
+nexus3                 5Gi        RWX            Retain           Bound    default/nexus3-pvc                 standard                104s
+
+
+Step 3: Create a nexus3 Deployment and Service Spec files 
+
+[root@master1 nexus3_project]# vim nexus3-deployment.yaml
+
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  name: nexus
+spec:
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: nexus-server
+    spec:
+      containers:
+        - name: nexus
+          image: sonatype/nexus3:latest
+          resources:
+            limits:
+              memory: "4Gi"
+              cpu: "1000m"
+            requests:
+              memory: "2Gi"
+              cpu: "500m"
+          ports:
+            - containerPort: 8081
+			  containerPort: 5000
+          volumeMounts:
+            - name: nexus-data
+              mountPath: /nexus-data
+      volumes:
+        - name: nexus-data
+          persistentVolumeClaim:
+            claimName: nexus3-pvc
+
+:wq (save and exit) 
+
+
+[root@master1 nexux3_project]# kubectl apply -f nexus3-deployment.yaml
+
+[root@master1 nexux3_project]# kubectl get pod
+
+NAME                              READY   STATUS    RESTARTS   AGE
+jenkins-57d44c9dd5-sxfjh          1/1     Running   0          143m
+nexus-67749b68fd-7zxb7            1/1     Running   0          35s
+sonar-postgres-69d5cc8d48-87c5g   1/1     Running   0          99m
+sonarqube-6bd5c5999b-5xgtq        1/1     Running   0          96m
+
+[root@master1 nexux3_project]# vim nexus3-service.yaml
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: nexus-service
+  annotations:
+      prometheus.io/scrape: 'true'
+      prometheus.io/path:   /
+      prometheus.io/port:   '8081'
+spec:
+  selector:
+    app: nexus-server
+  type: LoadBalancer
+  ports:
+    - port: 8081
+      targetPort: 8081
+	  name: nexusport
+ 
+
+:wq (save and exit) 
+
+
+[root@master1 nexux3_project]# kubectl apply -f nexus3-service.yaml
+
+[root@master1 nexux3_project]# kubectl get svc
+
+NAME             TYPE           CLUSTER-IP      EXTERNAL-IP     PORT(S)                          AGE
+jenkins          LoadBalancer   10.39.240.107   35.230.39.234   8080:31792/TCP,50000:32166/TCP   3h58m
+kubernetes       ClusterIP      10.39.240.1     <none>          443/TCP                          5h3m
+nexus-service    LoadBalancer   10.39.245.118   34.83.196.108   8081:31080/TCP                   40s
+sonar-postgres   ClusterIP      10.39.244.97    <none>          5432/TCP                         101m
+sonarqube        LoadBalancer   10.39.252.127   34.83.210.131   8282:32294/TCP                   95m
+
+Step 4: Now Open Web Browser and point to the below URL to access Nexus3 Dashboard: 
+
+http://34.83.196.108:8081
+
+Username: admin
+Password: admin123
+
+###################################################################################################################
