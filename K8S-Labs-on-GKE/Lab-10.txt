@@ -246,6 +246,7 @@ subjects:
 
 :wq (save and exit) 
 
+$ kubectl apply -f 03-rbac.yaml
 
 
 Step 4: Now that our default backend is running, we can create the Nginx Ingress Controller
