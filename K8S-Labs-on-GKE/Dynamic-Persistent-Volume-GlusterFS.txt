@@ -1,0 +1,666 @@
+Install Heketi and GlusterFS to allow Dynamic Persistent-Volume management with Openshift and Kubernetes 
+########################################################################################################
+
+Lab Setup: 
+
+Hostname	RAM		CPU		DISK					Role
+gfs-1		2 GB	1		/dev/sda,/dev/sdb		Heketi Server and GlusterFS
+gfs-2		2 GB	1		/dev/sda,/dev/sdb		GlusterFS
+
+
+Step 1: Configure SSH to allow root login with PasswordAuthentication on both Nodes: 
+
+$ sudo vim /etc/ssh/sshd_config 
+
+PermitRootLogin yes
+
+PasswordAuthentication yes
+
+
+:wq (save and exit) 
+
+
+$ sudo systemctl restart sshd
+ 
+
+
+Set the Password for root User on both Nodes: 
+
+$ sudo passwd root
+
+
+
+Step 2: Create LVM on both Nodes: 
+
+$ sudo yum install lvm2 -y 
+
+$ sudo pvcreate /dev/sdb
+
+$ sudo vgcreate gfs_vg /dev/sdb
+
+$ sudo lvcreate -n gfs_lv -l 100%FREE gfs_vg
+
+$ sudo vgdisplay
+
+$ sudo lvdisplay
+
+
+
+
+Step 3: Install GlusterFS Packages on both Nodes: 
+
+Search for the LTS glusterfs-server version and install it
+
+$ sudo yum search centos-release-gluster
+
+$ sudo yum install centos-release-gluster41.noarch -y
+$ sudo yum install glusterfs-server -y
+
+
+start and enable the service
+
+$ sudo systemctl start glusterd
+
+$ sudo systemctl enable glusterd
+
+$ sudo systemctl status glusterd
+
+
+Stop firewalld
+
+$ sudo systemctl stop firewalld
+
+$ sudo systemctl disable firewalld
+
+$ sudo systemctl status firewalld
+
+
+
+Allow write on mounted GlusterFS volume with SELinux
+
+$ sudo setsebool -P virt_sandbox_use_fusefs on
+
+$ sudo setsebool -P virt_use_fusefs on
+
+
+NOTE: All the previous steps must be done on all GlusterFS Systems
+
+
+
+Step 4: Install and configure Heketi on gfs-1 System: 
+
+Install heketi heketi-client from EPEL Repo 
+
+[root@gfs-1 ~]# yum -y --enablerepo=epel install heketi heketi-client
+
+
+Create SSH Key without any for root User
+
+[root@gfs-1 ~]# ssh-keygen -f /etc/heketi/heketi_key -t rsa -N ''
+
+
+
+Copy the ssh key created for ansible install to /etc/heketi/heket_key
+
+[root@gfs-1 ~]# chown heketi:heketi /etc/heketi/heketi_key*
+
+
+
+Install this key on all GlusterFS Nodes (gfs-2)
+
+[root@gfs-1 ~]# ssh-copy-id -i /etc/heketi/heketi_key.pub root@gfs-1
+[root@gfs-1 ~]# ssh-copy-id -i /etc/heketi/heketi_key.pub root@gfs-2
+
+
+
+Step 5:  Create /etc/heketi/heketi.json config file on gfs-1 Node
+
+
+[root@gfs-1 ~]# mv /etc/heketi/heketi.json /etc/heketi/heketi.json.orig
+
+[root@gfs-1 ~]# vim  /etc/heketi/heketi.json
+
+{
+  "_port_comment": "Heketi Server Port Number",
+  "port": "8080",
+  "_use_auth": "Enable JWT authorization. Please enable for deployment",
+  "use_auth": true,
+  "_jwt": "Private keys for access",
+  "jwt": {
+   "_admin": "HeketiAdmin",
+   "admin": {
+    "key": "PASSWORD_ADMIN"
+   },
+   "_user": "HeketiUser",
+   "user": {
+    "key": "PASSWORD_USER"
+   }
+  },
+  "_glusterfs_comment": "GlusterFS Configuration",
+  "glusterfs": {
+   "executor": "ssh",
+   "sshexec": {
+     "keyfile": "/etc/heketi/heketi_key",
+     "user": "root",
+     "port": "22",
+     "fstab": "/etc/fstab"
+   }
+  },
+  "_db_comment": "Database file name",
+  "db": "/var/lib/heketi/heketi.db",
+  "loglevel" : "debug"
+  }
+}
+
+:wq (save and exit) 
+
+
+Start and Enable heketi Service
+
+[root@gfs-1 ~]#  systemctl restart heketi
+
+[root@gfs-1 ~]#  systemctl enable heketi
+
+[root@gfs-1 ~]# systemctl status heketi
+
+
+Test the connection to Heketi:
+
+[root@gfs-1 ~]# curl http://gfs-1:8080/hello
+Hello from Heketi
+
+
+Set an environment variable for the Heketi server:
+
+[root@gfs-1 ~]# export HEKETI_CLI_SERVER=http://gfs-1:8080
+
+
+Step 6: Create the GlusterFS Cluster topology in  /usr/share/heketi/toppology-sample.json file
+
+[root@gfs-1 ~]# mv /usr/share/heketi/topology-sample.json /usr/share/heketi/topology-sample.json.orig
+
+[root@gfs-1 ~]# vim /usr/share/heketi/topology-sample.json 
+
+{
+  "clusters": [
+    {
+      "nodes": [
+        {
+          "node": {
+            "hostnames": {
+              "manage": [
+                "gfs-1"							## gfs-1 hostname
+              ],
+              "storage": [
+                "10.128.0.17"					## gfs-1 IP Address
+              ]
+            },
+            "zone": 1
+          },
+          "devices": [
+            "/dev/gfs_vg/gfs_lv"				## gfs-1 LVM
+          ]
+        },
+        {
+          "node": {
+            "hostnames": {
+              "manage": [
+                "gfs-2"							## gfs-2 hostname
+              ],
+              "storage": [
+                "10.128.0.18"					## gfs-2 IP Address
+              ]
+            },
+            "zone": 1
+          },
+          "devices": [
+            "/dev/gfs_vg/gfs_lv"				## gfs-2 LVM
+          ]
+        }
+      ]
+    }
+  ]
+}
+
+
+
+:wq (save and exit) 
+
+
+
+
+Step 7: Using heketi-cli, run the following command to load the topology of your environment.
+
+[root@gfs-1 ~]# heketi-cli --server http://gfs-1:8080 --user admin --secret PASSWORD_ADMIN \
+				topology load --json=/usr/share/heketi/topology-sample.json
+
+
+You will see the below output: 
+
+Creating cluster ... ID: 505a5e625ac1106106b6dea00c1434de
+        Allowing file volumes on cluster.
+        Allowing block volumes on cluster.
+        Creating node gfs-1 ... ID: 89988cfb96a3e197cb45762ec543d19b
+                Adding device /dev/gfs_vg/gfs_lv ... OK
+        Creating node gfs-2 ... ID: 730e0f1f23dfd90249a0c3d66c5ddffa
+                Adding device /dev/gfs_vg/gfs_lv ... OK
+
+
+[root@gfs-1 ~]# heketi-cli --server http://gfs-1:8080 --user admin --secret PASSWORD_ADMIN node list 
+
+Id:730e0f1f23dfd90249a0c3d66c5ddffa     Cluster:505a5e625ac1106106b6dea00c1434de
+Id:89988cfb96a3e197cb45762ec543d19b     Cluster:505a5e625ac1106106b6dea00c1434de
+
+
+[root@gfs-1 ~]# heketi-cli --server http://gfs-1:8080 --user admin --secret PASSWORD_ADMIN node info 730e0f1f23dfd90249a0c3d66c5ddffa     
+Node Id: 730e0f1f23dfd90249a0c3d66c5ddffa
+State: online
+Cluster Id: 505a5e625ac1106106b6dea00c1434de
+Zone: 1
+Management Hostname: gfs-2
+Storage Hostname: 10.128.0.18
+Devices:
+Id:f2572217f0f04ffa2e381e837105b077   Name:/dev/gfs_vg/gfs_lv  State:online    Size (GiB):499     Used (GiB):0       Free (GiB):499     Bricks:0       
+
+
+[root@gfs-1 ~]# heketi-cli --server http://gfs-1:8080 --user admin --secret PASSWORD_ADMIN node info 89988cfb96a3e197cb45762ec543d19b     
+Node Id: 89988cfb96a3e197cb45762ec543d19b
+State: online
+Cluster Id: 505a5e625ac1106106b6dea00c1434de
+Zone: 1
+Management Hostname: gfs-1
+Storage Hostname: 10.128.0.17
+Devices:
+Id:e7540044fb7250f46c3dbd0ad485a279   Name:/dev/gfs_vg/gfs_lv  State:online    Size (GiB):499     Used (GiB):0       Free (GiB):499     Bricks:0       
+
+
+[root@gfs-1 ~]# heketi-cli --server http://gfs-1:8080 --user admin --secret PASSWORD_ADMIN topology info 
+
+
+
+Create a Gluster volume to verify Heketi:
+
+[root@gfs-1 ~]# heketi-cli --server http://gfs-1:8080 --user admin --secret PASSWORD_ADMIN volume create  --durability=none --size=1
+
+[root@gfs-1 ~]# heketi-cli --server http://gfs-1:8080 --user admin --secret PASSWORD_ADMIN volume list 
+
+[root@gfs-1 ~]# heketi-cli --server http://gfs-1:8080 --user admin --secret PASSWORD_ADMIN volume delete f5feac455e71f857ea7a33205352f1ec
+
+				
+				
+Congratulations, You have successfully configured Heketi Server. Let's create Storage Class and Configure Dynamic Volume Provisioning for Kubernetes/Openshift. 
+
+
+
+Step 8: Create a  storageclass-heketi.yml Spec file for StorageClass: 
+
+$ vim storageclass-heketi.yml
+
+kind: StorageClass
+metadata:
+  name: heketi
+provisioner: kubernetes.io/glusterfs
+parameters:
+  resturl: "http://34.66.60.130:8080"
+  restuser: "admin"
+  restuserkey: "PASSWORD_ADMIN"
+  volumetype: "replicate:2"
+  
+
+:wq (save and exit) 
+
+
+$ kubectl apply -f storageclass-heketi.yml
+
+$ kubectl get StorageClass
+
+NAME                 PROVISIONER               AGE
+heketi               kubernetes.io/glusterfs   15s
+standard (default)   kubernetes.io/gce-pd      9d
+
+
+Step 9: Create a pvc-heketi.yml using the StorageClass "heketi" for testing purpose
+
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+ name: heketi-pvc
+spec:
+ accessModes:
+  - ReadWriteMany
+ resources:
+   requests:
+     storage: 1Gi
+ storageClassName: heketi
+
+:wq (save and exit) 
+
+
+$ kubectl apply -f pvc-heketi.yml
+
+
+$ kubectl get pvc
+NAME         STATUS   VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS   AGE
+heketi-pvc   Bound    pvc-71ea7210-9260-11e9-8bf4-42010a800055   1Gi        RWX            heketi         2m6s
+
+
+Step 10: Now Go to gfs-1 Node and run the below command to verify the Volume: 
+
+[root@gfs-1 ~]# heketi-cli --server http://gfs-1:8080 --user admin --secret PASSWORD_ADMIN volume list 
+Id:38b82fc2b11824f265d74400256f4a88    Cluster:505a5e625ac1106106b6dea00c1434de    Name:vol_38b82fc2b11824f265d74400256f4a88
+
+Yes, Volume has been created. 
+
+
+Step 11: Let's come back to GKE Cluster and delete this PVC 
+
+
+$ kubectl delete -f pvc-heketi.yml
+
+$ kubectl get pvc
+
+No resources found.
+
+
+Step 12: Go back to gfs-1 Node and run the below command to verify the Volume: 
+
+[root@gfs-1 ~]# heketi-cli --server http://gfs-1:8080 --user admin --secret PASSWORD_ADMIN volume list 
+
+Yes, Volume has been deleted. 
+
+
+Congratulations, You have successfully configured Dynamic Volume Provisioning for Kubernetes/Openshift Cluster. 
+
+################################################################################################################
+
+
+
+Create a NGINX Pod That Uses the PVC from Dynamic Volume
+#########################################################
+
+
+Step 1: Create a Namespace or Project 
+
+$ kubectl create ns project2
+
+$ kubectl get ns project2
+NAME       STATUS   AGE
+project2   Active   12s
+
+
+Step 2: Create a PVC to Request Storage for Your Application
+
+$ vim app-pvc.yml
+
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+ name: app-pvc
+spec:
+ accessModes:
+  - ReadWriteMany
+ resources:
+   requests:
+     storage: 1Gi
+ storageClassName: heketi
+ 
+:wq (save an exit) 
+
+
+$ kubectl apply -f app-pvc.yml -n project2
+
+$ kubectl get pvc -n project2
+
+NAME      STATUS   VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS   AGE
+app-pvc   Bound    pvc-e2b31dcb-9270-11e9-8bf4-42010a800055   1Gi        RWX            heketi         15s
+
+
+Step 3: Create a NGINX Deploument and Uses the PVC in the container section 
+
+$ vim nginx-deployment.yml
+
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  name: nginx
+spec:
+  replicas: 3
+  template:
+    metadata:
+      labels:
+        app: nginx
+    spec:
+      containers:
+      - name: nginx
+        image: nginx
+        ports:
+        - containerPort: 80
+        volumeMounts:
+        - mountPath: /usr/share/nginx/html
+          name: gluster-vol1
+        - mountPath: /var/log/nginx
+          name: log
+      volumes:
+      - name: gluster-vol1
+        persistentVolumeClaim:
+          claimName: app-pvc
+      - name: log
+        emptyDir: {}
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-svc
+spec:
+  type: LoadBalancer
+  ports:
+  - port: 80
+    targetPort: 80
+  selector:
+    app: nginx	  
+:wq (save and exit) 
+
+
+$ kubectl apply -f nginx-deployment.yml -n project2
+
+
+$ kubectl get pod -o wide  -n project2
+NAME                     READY   STATUS    RESTARTS   AGE   IP           NODE                                                NOMINATED NODE
+nginx-5c869f84d9-88bf4   1/1     Running   0          26s   10.8.2.83    gke-standard-cluster-1-default-pool-31d796d7-l5th   <none>
+nginx-5c869f84d9-pxw5x   1/1     Running   0          26s   10.8.1.127   gke-standard-cluster-1-default-pool-31d796d7-9z1s   <none>
+nginx-5c869f84d9-q5t4l   1/1     Running   0          26s   10.8.1.128   gke-standard-cluster-1-default-pool-31d796d7-9z1s   <none>
+
+
+$ kubectl get svc -o wide  -n project2
+NAME                        TYPE           CLUSTER-IP      EXTERNAL-IP      PORT(S)        AGE   SELECTOR
+glusterfs-dynamic-app-pvc   ClusterIP      10.11.249.106   <none>           1/TCP          16m   <none>
+nginx-svc                   LoadBalancer   10.11.248.76    35.239.174.206   80:31313/TCP   50s   app=nginx
+
+
+
+Step 4: Use kubectl exec command into the container and create an index.html file in the mountPath definition of the pod:
+
+$ kubectl exec -it nginx-5c869f84d9-88bf4 /bin/bash -n project2
+
+# cd /usr/share/nginx/html
+# echo 'Hello World from GlusterFS!!!' > index.html
+# ls
+index.html
+# exit
+
+
+Step 5: Try to access the URL:
+
+http://35.239.174.206
+
+
+Step 6: Let's delete everything
+
+$ kubectl delete -f nginx-deployment.yml -n project2
+
+$ kubectl delete -f app-pvc.yml -n project2
+
+$ kubectl delete ns project2
+
+
+##############################################################################################
+
+
+Deploy nginx with StatefulSet and Forward Traffic to Pods 
+##########################################################
+
+
+Step 1: You should have nginx Ingress Controller Running in kubernetes Cluster. 
+		If you have have it running, Please do the Lab-10 First, then come to this Lab. 
+		
+
+Step 2: Create nginx StatefulSet and Service Spec files 
+
+$ vim nginx-svc.yaml
+
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-service
+  labels:
+    app: nginx-sft
+spec:
+  ports:
+  - port: 80
+    name: web
+  clusterIP: None
+  selector:
+    app: nginx-sft
+
+
+$ kubectl apply -f nginx-svc.yaml -n project1
+
+$ kubectl get svc -n project1
+
+
+$ vim nginx-statefullset.yaml
+
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: nginx-http
+spec:
+  selector:
+    matchLabels:
+      app: nginx-sft
+  serviceName: "nginx-service"
+  replicas: 3
+  template:
+    metadata:
+      labels:
+        app: nginx-sft
+    spec:
+      terminationGracePeriodSeconds: 10
+      containers:
+      - name: nginx-sft
+        image: nginx:latest
+        ports:
+        - containerPort: 80
+          name: web
+        volumeMounts:
+        - name: www
+          mountPath: /usr/share/nginx/html
+  volumeClaimTemplates:
+  - metadata:
+      name: www
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      storageClassName: "heketi"
+      resources:
+        requests:
+          storage: 2Gi
+
+		  
+:wq (save and exit) 
+
+
+
+$ kubectl get pvc -n project1
+NAME               STATUS   VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS   AGE
+www-nginx-http-0   Bound    pvc-0324cba6-927e-11e9-8bf4-42010a800055   2Gi        RWO            heketi         45s
+www-nginx-http-1   Bound    pvc-079ec6fd-927e-11e9-8bf4-42010a800055   2Gi        RWO            heketi         37s
+www-nginx-http-2   Bound    pvc-0b65682d-927e-11e9-8bf4-42010a800055   2Gi        RWO            heketi         31s
+
+
+$ kubectl get pod -n project1 | egrep 'NAME|nginx-http'
+NAME                             READY   STATUS    RESTARTS   AGE
+nginx-http-0                     1/1     Running   0          86s
+nginx-http-1                     1/1     Running   0          78s
+nginx-http-2                     1/1     Running   0          72s
+
+
+
+Step 3: Let's create different index.html Page for nginx-http pods 
+
+$ kubectl exec -it nginx-http-0 bin/bash -n project1
+
+
+root@nginx-http-0:/# cd /usr/share/nginx/html/
+root@nginx-http-0:/usr/share/nginx/html# echo "Welcome to nginx-http-0 Pod" > index.html
+root@nginx-http-0:/usr/share/nginx/html# exit
+
+
+$ kubectl exec -it nginx-http-1 bin/bash -n project1
+
+root@nginx-http-1:/# cd /usr/share/nginx/html/
+root@nginx-http-1:/usr/share/nginx/html# echo "Welcome to nginx-http-1 Pod" > index.html
+root@nginx-http-1:/usr/share/nginx/html# exit
+
+
+$ kubectl exec -it nginx-http-2 bin/bash -n project1
+
+root@nginx-http-2:/# cd /usr/share/nginx/html/
+root@nginx-http-2:/usr/share/nginx/html# echo "Welcome to nginx-http-2 Pod" > index.html
+root@nginx-http-2:/usr/share/nginx/html# exit
+
+Step 4: Configure Ingress rule to forward traffic 
+
+
+$ vim ingress-rules.yaml
+
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  name: test-ingress
+spec:
+  rules:
+  - host: test.example.com
+    http:
+      paths:
+      - path: /
+        backend:
+          serviceName: nginx-service
+          servicePort: 80
+		  
+:wq (save and exit) 
+
+$ kubectl apply -f ingress-rules.yaml -n project1
+
+$ kubectl get ingress -n project1
+NAME                  HOSTS                                               ADDRESS        PORTS   AGE
+test-ingress          test.example.com                                    34.68.185.88   80      90s
+
+
+Step 5: Open Web Browser and access http://test.example.com and refresh the Page few times. 
+
+
+Step 6: Delete everything
+
+
+$ kubectl delete -f ingress-rules.yaml -n project1
+$ kubectl delete -f nginx-statefullset.yaml -n project1
+$ kubectl delete -f nginx-svc.yaml -n project1
+
+$ kubectl delete pvc www-nginx-http-0 -n project1
+$ kubectl delete pvc www-nginx-http-1 -n project1
+$ kubectl delete pvc www-nginx-http-2 -n project1
+
+############################################################################################################
