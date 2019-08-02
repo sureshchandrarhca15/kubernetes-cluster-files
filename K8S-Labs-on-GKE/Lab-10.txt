@@ -249,9 +249,45 @@ subjects:
 $ kubectl apply -f 03-rbac.yaml
 
 
+Step 4: Create Nginx Ingress Controller Service so that it will have External IP through which users will connect to our app.
+
+$ vim 04-nginx-ingress-controller-svc.yaml
+
+kind: Service
+apiVersion: v1
+metadata:
+  name: ingress-nginx
+  namespace: ingress-nginx
+  labels:
+    app: ingress-nginx
+spec:
+  externalTrafficPolicy: Local
+  type: LoadBalancer
+  selector:
+    app: ingress-nginx
+  ports:
+  - name: http
+    port: 80
+    targetPort: http
+  - name: https
+    port: 443
+    targetPort: https
+
+:wq (save and exit) 
+
+
+$ kubectl apply -f 04-nginx-ingress-controller-svc.yaml
+
+$ kubectl get svc -n ingress-nginx
+
+NAME                   TYPE           CLUSTER-IP     EXTERNAL-IP     PORT(S)                      AGE
+default-http-backend   ClusterIP      10.11.248.10   <none>          80/TCP                       26m
+ingress-nginx          LoadBalancer   10.11.244.38   34.66.129.247   80:31164/TCP,443:30427/TCP   4m50s
+
+
 Step 4: Now that our default backend is running, we can create the Nginx Ingress Controller
 
-$ vim 04-nginx-ingress-controller.yaml
+$ vim 05-nginx-ingress-controller.yaml
 
 apiVersion: extensions/v1beta1
 kind: Deployment
@@ -326,41 +362,6 @@ NAME                                        READY   STATUS    RESTARTS   AGE
 default-http-backend-587b7d64b5-6t9vc       1/1     Running   0          18m
 nginx-ingress-controller-84fcff8694-6jkxc   1/1     Running   0          78s
 
-
-Step 5: Expose this deployment so that it will have External IP through which users will connect to our app.
-
-$ vim 05-nginx-ingress-controller-svc.yaml
-
-kind: Service
-apiVersion: v1
-metadata:
-  name: ingress-nginx
-  namespace: ingress-nginx
-  labels:
-    app: ingress-nginx
-spec:
-  externalTrafficPolicy: Local
-  type: LoadBalancer
-  selector:
-    app: ingress-nginx
-  ports:
-  - name: http
-    port: 80
-    targetPort: http
-  - name: https
-    port: 443
-    targetPort: https
-
-:wq (save and exit) 
-
-
-$ kubectl apply -f 05-nginx-ingress-controller-svc.yaml
-
-$ kubectl get svc -n ingress-nginx
-
-NAME                   TYPE           CLUSTER-IP     EXTERNAL-IP     PORT(S)                      AGE
-default-http-backend   ClusterIP      10.11.248.10   <none>          80/TCP                       26m
-ingress-nginx          LoadBalancer   10.11.244.38   34.66.129.247   80:31164/TCP,443:30427/TCP   4m50s
 
 
 
@@ -552,11 +553,11 @@ NAME                 HOSTS              ADDRESS         PORTS   AGE
 cafe-ingress-nginx   cafe.example.com   34.66.129.247   80      14s
 
 #############################################################################################################################		
-#											NOTE 																			#
-#																															#
-#	This resource has an annotation "kubernetes.io/ingress.class: "nginx"". 												#
-#	This is needed because this ingress is only to be picked up by our Nginx Ingress Controller, not the one by GKE.		#
-#																															#
+#						NOTE 									    #
+#															    #
+#	This resource has an annotation "kubernetes.io/ingress.class: "nginx"". 					    #
+#	This is needed because this ingress is only to be picked up by our Nginx Ingress Controller, not the one by GKE.    #
+#															    #
 #############################################################################################################################	
 
 
